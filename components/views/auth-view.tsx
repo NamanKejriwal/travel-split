@@ -48,6 +48,7 @@ export function AuthView({ mode, onSubmit, onSwitchMode, onBack }: AuthViewProps
             data: {
               full_name: fullName,
             },
+            emailRedirectTo: "https://travel-split1.vercel.app",
           },
         })
         if (authError) throw authError
