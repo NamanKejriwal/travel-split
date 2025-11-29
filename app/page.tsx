@@ -1,103 +1,176 @@
-import Image from "next/image";
+"use client"
+
+import { useState } from "react"
+import { AppLayout } from "@/components/app-layout"
+import { Dashboard } from "@/components/dashboard"
+import { ActivityView } from "@/components/views/activity-view"
+import { AccountView } from "@/components/views/account-view"
+import { GroupsView, Group } from "@/components/views/groups-view"
+import { LandingView } from "@/components/views/landing-view"
+import { AuthView } from "@/components/views/auth-view"
+// IMPORT NEW VIEW
+import { BalanceView } from "@/components/views/balance-view"
+import { AddExpenseDrawer, ExpenseToEdit } from "@/components/add-expense-drawer"
+import { SettleUpDialog } from "@/components/settle-up-dialog"
+import { ProfileSetupView } from "@/components/views/profile-setup-view"
+import { supabase } from "@/lib/supabaseClient"
+
+type View = "landing" | "login" | "signup" | "profile-setup" | "app"
+// Added "balance" to types
+type Tab = "dashboard" | "activity" | "groups" | "account" | "balance"
 
 export default function Home() {
-  return (
-    <div className="grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20 font-[family-name:var(--font-geist-sans)]">
-      <main className="flex flex-col gap-[32px] row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="list-inside list-decimal text-sm/6 text-center sm:text-left font-[family-name:var(--font-geist-mono)]">
-          <li className="mb-2 tracking-[-.01em]">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] px-1 py-0.5 rounded font-[family-name:var(--font-geist-mono)] font-semibold">
-              app/page.tsx
-            </code>
-            .
-          </li>
-          <li className="tracking-[-.01em]">
-            Save and see your changes instantly.
-          </li>
-        </ol>
+  const [currentView, setCurrentView] = useState<View>("landing")
+  const [activeTab, setActiveTab] = useState<Tab>("dashboard")
+  
+  const [addExpenseOpen, setAddExpenseOpen] = useState(false)
+  const [settleUpOpen, setSettleUpOpen] = useState(false)
+  const [expenseToEdit, setExpenseToEdit] = useState<ExpenseToEdit | null>(null)
+  
+  const [refreshKey, setRefreshKey] = useState(0)
+  const [activeGroup, setActiveGroup] = useState<Group | null>(null)
 
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:w-auto"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
-            />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 w-full sm:w-auto md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read our docs
-          </a>
-        </div>
-      </main>
-      <footer className="row-start-3 flex gap-[24px] flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
-          />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
-      </footer>
-    </div>
-  );
+  const checkProfileAndNavigate = async () => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) {
+        setCurrentView("login")
+        return
+      }
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('full_name')
+        .eq('id', user.id)
+        .single()
+
+      if (profile && profile.full_name) {
+        setCurrentView("app")
+      } else {
+        setCurrentView("profile-setup")
+      }
+    } catch (error) {
+      console.error("Profile check failed:", error)
+      setCurrentView("app") 
+    }
+  }
+
+  const handleGetStarted = () => setCurrentView("signup")
+  const handleAuthSuccess = () => checkProfileAndNavigate()
+  const handleSwitchToLogin = () => setCurrentView("login")
+  const handleSwitchToSignup = () => setCurrentView("signup")
+  const handleBackToLanding = () => setCurrentView("landing")
+  
+  const handleLogout = () => {
+    setCurrentView("landing")
+    setActiveTab("dashboard")
+    setActiveGroup(null) 
+  }
+
+  const handleTabChange = (tab: string) => {
+    setActiveTab(tab as Tab)
+  }
+
+  const handleGroupSelect = (group: Group) => {
+    setActiveGroup(group)       
+    setActiveTab("dashboard")   
+  }
+
+  const handleSettleUp = () => setSettleUpOpen(true)
+  
+  const handleOpenAddExpense = () => {
+    setExpenseToEdit(null)
+    setAddExpenseOpen(true)
+  }
+
+  const handleEditExpense = (expense: ExpenseToEdit) => {
+    setExpenseToEdit(expense)
+    setAddExpenseOpen(true)
+  }
+
+  const handleDrawerChange = (open: boolean) => {
+    setAddExpenseOpen(open)
+    if (!open) {
+        setTimeout(() => setExpenseToEdit(null), 300) 
+    }
+  }
+
+  const handleExpenseAdded = () => {
+      setRefreshKey(prev => prev + 1) 
+      setAddExpenseOpen(false) 
+  }
+
+  const renderAppTab = () => {
+    switch (activeTab) {
+      case "dashboard":
+        // @ts-ignore
+        return <Dashboard 
+          key={refreshKey} 
+          activeGroup={activeGroup} 
+          onSettleUp={handleSettleUp} 
+          onEditExpense={handleEditExpense} 
+        />
+      case "balance":
+        // NEW TAB RENDER
+        // @ts-ignore
+        return <BalanceView key={refreshKey} activeGroup={activeGroup} onSettleUp={handleSettleUp} />
+      case "activity":
+        // @ts-ignore
+        return <ActivityView key={refreshKey} activeGroup={activeGroup} />
+      case "groups":
+        return <GroupsView onSelectGroup={handleGroupSelect} />
+      case "account":
+        return <AccountView onLogout={handleLogout} />
+      default:
+        // @ts-ignore
+        return <Dashboard key={refreshKey} activeGroup={activeGroup} onSettleUp={handleSettleUp} />
+    }
+  }
+
+  if (currentView === "landing") {
+    return <LandingView onGetStarted={handleGetStarted} />
+  }
+
+  if (currentView === "login") {
+    return (
+      <AuthView mode="login" onSubmit={handleAuthSuccess} onSwitchMode={handleSwitchToSignup} onBack={handleBackToLanding} />
+    )
+  }
+
+  if (currentView === "signup") {
+    return (
+      <AuthView mode="signup" onSubmit={handleAuthSuccess} onSwitchMode={handleSwitchToLogin} onBack={handleBackToLanding} />
+    )
+  }
+
+  if (currentView === "profile-setup") {
+    return <ProfileSetupView onComplete={() => setCurrentView("app")} />
+  }
+
+  return (
+    <AppLayout
+      activeTab={activeTab}
+      onTabChange={handleTabChange}
+      addExpenseOpen={addExpenseOpen}
+      setAddExpenseOpen={handleOpenAddExpense} 
+      settleUpOpen={settleUpOpen}
+      setSettleUpOpen={setSettleUpOpen}
+    >
+      {renderAppTab()}
+
+      <AddExpenseDrawer 
+        open={addExpenseOpen} 
+        onOpenChange={handleDrawerChange}
+        activeGroup={activeGroup}
+        onExpenseAdded={handleExpenseAdded}
+        expenseToEdit={expenseToEdit}
+      />
+
+      <SettleUpDialog 
+        open={settleUpOpen}
+        onOpenChange={setSettleUpOpen}
+        activeGroup={activeGroup}
+        onSettled={handleExpenseAdded}
+      />
+    </AppLayout>
+  )
 }
