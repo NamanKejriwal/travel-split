@@ -96,7 +96,6 @@ export function AddExpenseDrawer({ open, onOpenChange, activeGroup, onExpenseAdd
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) return
 
-      // FIXED QUERY: Added created_by to match Group interface
       const { data, error } = await supabase
         .from('group_members')
         .select('groups(id, name, created_at, created_by)')
@@ -104,13 +103,12 @@ export function AddExpenseDrawer({ open, onOpenChange, activeGroup, onExpenseAdd
 
       if (error) throw error
 
-      // FIXED MAPPING: Explicitly handle the structure and cast
       // @ts-ignore
       const rawData = data || []
       const groups = rawData
         // @ts-ignore
         .map(item => Array.isArray(item.groups) ? item.groups[0] : item.groups)
-        .filter(Boolean) as Group[] // Force cast to Group[] to satisfy TypeScript
+        .filter(Boolean) as Group[] 
 
       setAvailableGroups(groups)
       
@@ -150,8 +148,17 @@ export function AddExpenseDrawer({ open, onOpenChange, activeGroup, onExpenseAdd
 
       // @ts-ignore
       let mappedMembers: Member[] = (data || []).map(item => {
-        if (item.profiles && item.profiles.full_name) return item.profiles
-        if (user && item.user_id === user.id) return { id: user.id, full_name: 'You' }
+        // Safe access: handle if profiles is array or object
+        const profile = Array.isArray(item.profiles) ? item.profiles[0] : item.profiles;
+
+        if (profile && profile.full_name) {
+            return { id: profile.id, full_name: profile.full_name }
+        }
+        
+        if (user && item.user_id === user.id) {
+            return { id: user.id, full_name: 'You' }
+        }
+        
         return { id: item.user_id, full_name: 'Unknown Member' }
       })
 
@@ -322,8 +329,6 @@ export function AddExpenseDrawer({ open, onOpenChange, activeGroup, onExpenseAdd
           </DrawerHeader>
           
           <div className="p-4 space-y-4">
-            
-            {/* GROUP SELECTOR */}
             {!activeGroup && !isEditing && (
                 <div className="space-y-2">
                     <Label className="text-emerald-600 font-semibold">Select Trip</Label>
@@ -340,7 +345,6 @@ export function AddExpenseDrawer({ open, onOpenChange, activeGroup, onExpenseAdd
                 </div>
             )}
 
-            {/* Amount */}
             <div className="space-y-2">
                <Label className="text-center block text-xs text-muted-foreground uppercase tracking-wide">Amount</Label>
                <div className="flex items-center justify-center">
@@ -355,7 +359,6 @@ export function AddExpenseDrawer({ open, onOpenChange, activeGroup, onExpenseAdd
                </div>
             </div>
 
-            {/* Category */}
             <div className="space-y-2">
                 <Label>Category</Label>
                 <Select value={category} onValueChange={setCategory}>
@@ -375,7 +378,6 @@ export function AddExpenseDrawer({ open, onOpenChange, activeGroup, onExpenseAdd
                 </Select>
             </div>
 
-            {/* Description */}
             <div className="space-y-2">
                 <Label>Description</Label>
                 <Input 
@@ -385,7 +387,6 @@ export function AddExpenseDrawer({ open, onOpenChange, activeGroup, onExpenseAdd
                 />
             </div>
 
-            {/* Paid By */}
             <div className="space-y-2">
                 <Label>Paid By</Label>
                 <Select value={paidBy} onValueChange={setPaidBy} disabled={!targetGroupId}>
@@ -400,7 +401,6 @@ export function AddExpenseDrawer({ open, onOpenChange, activeGroup, onExpenseAdd
                 </Select>
             </div>
 
-            {/* Split With */}
             <div className="space-y-2">
                 <Label className="mb-2 block">Split With</Label>
                 <div className="grid grid-cols-2 gap-2">

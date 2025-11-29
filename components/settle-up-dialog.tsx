@@ -40,14 +40,19 @@ export function SettleUpDialog({ open, onOpenChange, activeGroup, onSettled }: S
 
       if (error) throw error
 
-      // Robust Mapping
+      // FIXED: Safely handle if profiles is an array or object
       // @ts-ignore
-      const validMembers = (data || []).map(item => {
-         if (item.profiles && item.profiles.full_name) return item.profiles
+      const validMembers = (data || []).map((item: any) => {
+         const profile = Array.isArray(item.profiles) ? item.profiles[0] : item.profiles
+         
+         if (profile && profile.full_name) return profile
+         // Fallback if profile is missing
          return { id: item.user_id, full_name: 'Unknown User' }
       })
 
+      // Filter out YOURSELF (You don't pay yourself)
       const others = validMembers.filter((m: any) => m.id !== user?.id)
+      
       setMembers(others)
 
     } catch (err) {
@@ -67,13 +72,14 @@ export function SettleUpDialog({ open, onOpenChange, activeGroup, onSettled }: S
 
       const numAmount = parseFloat(amount)
 
+      // 1. Create the Settlement Transaction
       const { data: expense, error: expenseError } = await supabase
         .from('expenses')
         .insert({
             group_id: activeGroup.id,
             description: 'Settlement',
             amount: numAmount,
-            paid_by: user.id,
+            paid_by: user.id, // I paid
             is_settlement: true
         })
         .select()
@@ -81,11 +87,12 @@ export function SettleUpDialog({ open, onOpenChange, activeGroup, onSettled }: S
 
       if (expenseError) throw expenseError
 
+      // 2. Record the split
       const { error: splitError } = await supabase
         .from('expense_splits')
         .insert({
             expense_id: expense.id,
-            user_id: payTo,
+            user_id: payTo, // You paid TO this person
             amount_owed: numAmount
         })
 

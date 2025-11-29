@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { supabase } from "@/lib/supabaseClient"
 import { Loader2, Receipt, ArrowRightLeft, MapPin, UserPlus, Copy, Check, Trash2, Users, Pencil } from "lucide-react"
@@ -16,13 +16,14 @@ interface DashboardProps {
   onEditExpense: (expense: ExpenseToEdit) => void
 }
 
+// FIXED: Added 'category' to the interface
 interface Expense {
   id: string
   description: string
   amount: number
   paid_by: string
   created_at: string
-  category?: string
+  category?: string 
   is_settlement?: boolean
   profiles?: {
     full_name: string
@@ -36,13 +37,13 @@ interface Member {
 
 // Simple Color Map for Categories
 const CATEGORY_COLORS: Record<string, string> = {
-  "Food": "#10b981", // Emerald
-  "Local Transport": "#3b82f6", // Blue
-  "Travel": "#8b5cf6", // Violet
-  "Hostel / Hotel": "#f59e0b", // Amber
-  "Shopping": "#ec4899", // Pink
-  "Activity": "#ef4444", // Red
-  "Other": "#9ca3af" // Gray
+  "Food": "#10b981", 
+  "Local Transport": "#3b82f6", 
+  "Travel": "#8b5cf6", 
+  "Hostel / Hotel": "#f59e0b", 
+  "Shopping": "#ec4899", 
+  "Activity": "#ef4444", 
+  "Other": "#9ca3af" 
 }
 
 export function Dashboard({ activeGroup, onSettleUp, onEditExpense }: DashboardProps) {
@@ -50,12 +51,13 @@ export function Dashboard({ activeGroup, onSettleUp, onEditExpense }: DashboardP
   const [members, setMembers] = useState<Member[]>([])
   const [currentUser, setCurrentUser] = useState<any>(null)
   const [loading, setLoading] = useState(false)
-  const [categoryStats, setCategoryStats] = useState<{label: string, value: number, color: string}[]>([])
   
+  // Stats
   const [totalCost, setTotalCost] = useState(0)
   const [myPaid, setMyPaid] = useState(0)
   const [myShare, setMyShare] = useState(0)
   const [netBalance, setNetBalance] = useState(0)
+  const [categoryStats, setCategoryStats] = useState<{label: string, value: number, color: string}[]>([])
   
   const [inviteCode, setInviteCode] = useState<string>("")
   const [copied, setCopied] = useState(false)
@@ -94,8 +96,13 @@ export function Dashboard({ activeGroup, onSettleUp, onEditExpense }: DashboardP
         .eq('group_id', activeGroup.id)
       
       if (memberData) {
+        // Robust Mapping for Members
         // @ts-ignore
-        const cleanMembers = memberData.map(m => m.profiles).filter(Boolean)
+        const cleanMembers = (memberData as any[]).map((m) => {
+            const profile = Array.isArray(m.profiles) ? m.profiles[0] : m.profiles
+            return profile
+        }).filter(Boolean) as Member[]
+        
         setMembers(cleanMembers)
       }
 
@@ -111,11 +118,15 @@ export function Dashboard({ activeGroup, onSettleUp, onEditExpense }: DashboardP
 
       if (expenseError) throw expenseError
 
-      // @ts-ignore
-      const allExpenses: Expense[] = expenseData || []
+      // Robust Mapping for Expenses
+      const allExpenses = (expenseData || []).map((e: any) => {
+         const profile = Array.isArray(e.profiles) ? e.profiles[0] : e.profiles
+         return { ...e, profiles: profile }
+      }) as Expense[]
+      
       setExpenses(allExpenses)
       
-      // 3. Stats Calculation
+      // 3. Calculate Totals
       const realExpenses = allExpenses.filter(e => !e.is_settlement)
       
       const total = realExpenses.reduce((sum, item) => sum + Number(item.amount), 0)
@@ -126,7 +137,7 @@ export function Dashboard({ activeGroup, onSettleUp, onEditExpense }: DashboardP
         .reduce((sum, item) => sum + Number(item.amount), 0)
       setMyPaid(myOutflow)
 
-      // 4. Category Calculation
+      // 4. Category Stats Calculation
       const catMap = new Map<string, number>()
       realExpenses.forEach(e => {
         const cat = e.category || "Other"
@@ -155,7 +166,10 @@ export function Dashboard({ activeGroup, onSettleUp, onEditExpense }: DashboardP
       ) || []
 
       const share = myGroupSplits
-        .filter((s: any) => !s.expenses?.is_settlement)
+        .filter((s: any) => {
+            const exp = Array.isArray(s.expenses) ? s.expenses[0] : s.expenses
+            return !exp?.is_settlement
+        })
         .reduce((sum: number, item: any) => sum + Number(item.amount_owed), 0)
       setMyShare(share)
 
@@ -163,7 +177,7 @@ export function Dashboard({ activeGroup, onSettleUp, onEditExpense }: DashboardP
       setNetBalance(myOutflow - totalConsumption)
 
     } catch (error: any) {
-      console.error('Error fetching data:', error)
+      console.error('Error fetching data:', JSON.stringify(error, null, 2))
     } finally {
       setLoading(false)
     }
@@ -173,9 +187,14 @@ export function Dashboard({ activeGroup, onSettleUp, onEditExpense }: DashboardP
     if (!confirm("Are you sure you want to delete this expense?")) return
 
     try {
-        const { error } = await supabase.from('expenses').delete().eq('id', expenseId)
+        const { error } = await supabase
+            .from('expenses')
+            .delete()
+            .eq('id', expenseId)
+        
         if (error) throw error
         fetchData()
+        
     } catch (error: any) {
         console.error("Error deleting:", error)
         alert("Could not delete expense. " + error.message)
@@ -194,7 +213,6 @@ export function Dashboard({ activeGroup, onSettleUp, onEditExpense }: DashboardP
     
     let cumulativePercent = 0
     
-    // Create SVG paths
     const paths = categoryStats.map((stat, i) => {
         const percent = stat.value / totalCost
         const startX = Math.cos(2 * Math.PI * cumulativePercent)
@@ -207,7 +225,6 @@ export function Dashboard({ activeGroup, onSettleUp, onEditExpense }: DashboardP
         
         const largeArcFlag = percent > 0.5 ? 1 : 0
         
-        // Single slice case (100%)
         if (percent === 1) {
             return <circle key={i} cx="0" cy="0" r="1" fill={stat.color} />
         }
@@ -218,18 +235,14 @@ export function Dashboard({ activeGroup, onSettleUp, onEditExpense }: DashboardP
 
     return (
         <div className="flex gap-6 items-center">
-            {/* Chart */}
             <div className="relative w-32 h-32 shrink-0">
                 <svg viewBox="-1 -1 2 2" style={{ transform: 'rotate(-90deg)' }} className="w-full h-full">
                     {paths}
                 </svg>
-                {/* Center hole for Donut effect */}
                 <div className="absolute inset-0 m-auto w-16 h-16 bg-white rounded-full flex items-center justify-center shadow-inner">
                     <span className="text-[10px] text-zinc-400 font-medium">Total</span>
                 </div>
             </div>
-            
-            {/* Legend */}
             <div className="flex-1 space-y-2 text-xs">
                 {categoryStats.map((stat, i) => (
                     <div key={i} className="flex items-center justify-between">
@@ -252,7 +265,9 @@ export function Dashboard({ activeGroup, onSettleUp, onEditExpense }: DashboardP
           <MapPin className="h-8 w-8 text-emerald-600" />
         </div>
         <h2 className="text-xl font-semibold">No Trip Selected</h2>
-        <p className="text-zinc-500 max-w-xs">Go to Groups to select a trip.</p>
+        <p className="text-zinc-500 max-w-xs">
+          Go to the <span className="font-bold text-emerald-600">Groups Tab</span> and select a trip.
+        </p>
       </div>
     )
   }
@@ -306,7 +321,7 @@ export function Dashboard({ activeGroup, onSettleUp, onEditExpense }: DashboardP
         </div>
       </div>
 
-      {/* Members */}
+      {/* Members Preview */}
       {members.length > 0 && (
         <div className="flex -space-x-2 overflow-hidden py-1">
             {members.map((m) => (
@@ -348,13 +363,11 @@ export function Dashboard({ activeGroup, onSettleUp, onEditExpense }: DashboardP
         </CardContent>
       </Card>
 
-      {/* Chart */}
+      {/* Spending By Category Chart */}
       {totalCost > 0 && (
         <Card>
-            <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-medium text-zinc-500 uppercase tracking-wider">Spending by Category</CardTitle>
-            </CardHeader>
-            <CardContent>
+            <CardContent className="pt-6">
+                <h3 className="text-sm font-medium text-zinc-500 uppercase tracking-wider mb-4">Spending by Category</h3>
                 {renderPieChart()}
             </CardContent>
         </Card>
@@ -395,6 +408,7 @@ export function Dashboard({ activeGroup, onSettleUp, onEditExpense }: DashboardP
                         </p>
                       </div>
                       
+                      {/* ACTION BUTTONS (Edit/Delete) - Only if YOU paid */}
                       {currentUser && expense.paid_by === currentUser.id && (
                         <div className="flex gap-1 ml-2">
                           <Button 

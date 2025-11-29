@@ -65,8 +65,13 @@ export function GroupsView({ onSelectGroup }: GroupsViewProps) {
 
       if (error) throw error
 
+      // FIXED: robust mapping to handle if 'groups' is returned as object or array
       // @ts-ignore
-      const formattedGroups = data.map(item => item.groups).filter(Boolean)
+      const formattedGroups = (data || []).map(item => {
+        const groupData = Array.isArray(item.groups) ? item.groups[0] : item.groups
+        return groupData
+      }).filter(Boolean) as Group[]
+
       setGroups(formattedGroups)
     } catch (error: any) {
       console.error('Error fetching groups:', error)
