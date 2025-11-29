@@ -48,7 +48,7 @@ export function AddExpenseDrawer({ open, onOpenChange, activeGroup, onExpenseAdd
   const [description, setDescription] = useState("")
   const [amount, setAmount] = useState("")
   const [paidBy, setPaidBy] = useState("")
-  const [category, setCategory] = useState("Food") // Default
+  const [category, setCategory] = useState("Food")
   const [splitWith, setSplitWith] = useState<string[]>([])
   
   const [members, setMembers] = useState<Member[]>([])
@@ -96,15 +96,22 @@ export function AddExpenseDrawer({ open, onOpenChange, activeGroup, onExpenseAdd
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) return
 
+      // FIXED QUERY: Added created_by to match Group interface
       const { data, error } = await supabase
         .from('group_members')
-        .select('groups(id, name, created_at)')
+        .select('groups(id, name, created_at, created_by)')
         .eq('user_id', user.id)
 
       if (error) throw error
 
+      // FIXED MAPPING: Explicitly handle the structure and cast
       // @ts-ignore
-      const groups = data.map(item => item.groups).filter(Boolean)
+      const rawData = data || []
+      const groups = rawData
+        // @ts-ignore
+        .map(item => Array.isArray(item.groups) ? item.groups[0] : item.groups)
+        .filter(Boolean) as Group[] // Force cast to Group[] to satisfy TypeScript
+
       setAvailableGroups(groups)
       
       if (groups.length === 1) setManualGroupId(groups[0].id)
@@ -315,6 +322,24 @@ export function AddExpenseDrawer({ open, onOpenChange, activeGroup, onExpenseAdd
           </DrawerHeader>
           
           <div className="p-4 space-y-4">
+            
+            {/* GROUP SELECTOR */}
+            {!activeGroup && !isEditing && (
+                <div className="space-y-2">
+                    <Label className="text-emerald-600 font-semibold">Select Trip</Label>
+                    <Select value={manualGroupId} onValueChange={setManualGroupId}>
+                        <SelectTrigger>
+                            <SelectValue placeholder="Choose a trip..." />
+                        </SelectTrigger>
+                        <SelectContent>
+                            {availableGroups.map(group => (
+                                <SelectItem key={group.id} value={group.id}>{group.name}</SelectItem>
+                            ))}
+                        </SelectContent>
+                    </Select>
+                </div>
+            )}
+
             {/* Amount */}
             <div className="space-y-2">
                <Label className="text-center block text-xs text-muted-foreground uppercase tracking-wide">Amount</Label>
