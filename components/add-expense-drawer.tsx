@@ -7,7 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Checkbox } from "@/components/ui/checkbox"
 import { supabase } from "@/lib/supabaseClient"
 import { Group } from "@/components/views/groups-view"
-import { Loader2, AlertTriangle, Bus, Plane, BedDouble, Utensils, ShoppingBag, Ticket, HelpCircle } from "lucide-react"
+import { Loader2, AlertTriangle, Bus, Plane, BedDouble, Utensils, ShoppingBag, Ticket, HelpCircle, Wallet, Smartphone, CreditCard } from "lucide-react"
 
 export interface ExpenseToEdit {
   id: string
@@ -15,6 +15,7 @@ export interface ExpenseToEdit {
   amount: number
   paid_by: string
   category?: string
+  payment_mode?: string
 }
 
 interface AddExpenseDrawerProps {
@@ -49,6 +50,7 @@ export function AddExpenseDrawer({ open, onOpenChange, activeGroup, onExpenseAdd
   const [amount, setAmount] = useState("")
   const [paidBy, setPaidBy] = useState("")
   const [category, setCategory] = useState("Food")
+  const [paymentMode, setPaymentMode] = useState("UPI")
   const [splitWith, setSplitWith] = useState<string[]>([])
   
   const [members, setMembers] = useState<Member[]>([])
@@ -73,11 +75,13 @@ export function AddExpenseDrawer({ open, onOpenChange, activeGroup, onExpenseAdd
           setAmount(expenseToEdit.amount.toString())
           setPaidBy(expenseToEdit.paid_by)
           setCategory(expenseToEdit.category || "Food")
+          setPaymentMode(expenseToEdit.payment_mode || "UPI")
           await fetchExistingSplits(expenseToEdit.id)
         } else {
           setDescription("")
           setAmount("")
           setCategory("Food")
+          setPaymentMode("UPI")
         }
         setIsInitializing(false)
       }
@@ -148,17 +152,9 @@ export function AddExpenseDrawer({ open, onOpenChange, activeGroup, onExpenseAdd
 
       // @ts-ignore
       let mappedMembers: Member[] = (data || []).map(item => {
-        // Safe access: handle if profiles is array or object
         const profile = Array.isArray(item.profiles) ? item.profiles[0] : item.profiles;
-
-        if (profile && profile.full_name) {
-            return { id: profile.id, full_name: profile.full_name }
-        }
-        
-        if (user && item.user_id === user.id) {
-            return { id: user.id, full_name: 'You' }
-        }
-        
+        if (profile && profile.full_name) return { id: profile.id, full_name: profile.full_name }
+        if (user && item.user_id === user.id) return { id: user.id, full_name: 'You' }
         return { id: item.user_id, full_name: 'Unknown Member' }
       })
 
@@ -199,7 +195,8 @@ export function AddExpenseDrawer({ open, onOpenChange, activeGroup, onExpenseAdd
             description,
             amount: numericAmount,
             paid_by: paidBy,
-            category
+            category,
+            payment_mode: paymentMode
           })
           .eq('id', expenseId)
         
@@ -220,7 +217,8 @@ export function AddExpenseDrawer({ open, onOpenChange, activeGroup, onExpenseAdd
               description,
               amount: numericAmount,
               paid_by: paidBy,
-              category
+              category,
+              payment_mode: paymentMode
           })
           .select()
           .single()
@@ -255,6 +253,7 @@ export function AddExpenseDrawer({ open, onOpenChange, activeGroup, onExpenseAdd
         setDescription("")
         setAmount("")
         setCategory("Food")
+        setPaymentMode("UPI")
       }
 
     } catch (error: any) {
@@ -329,6 +328,7 @@ export function AddExpenseDrawer({ open, onOpenChange, activeGroup, onExpenseAdd
           </DrawerHeader>
           
           <div className="p-4 space-y-4">
+            
             {!activeGroup && !isEditing && (
                 <div className="space-y-2">
                     <Label className="text-emerald-600 font-semibold">Select Trip</Label>
@@ -359,23 +359,31 @@ export function AddExpenseDrawer({ open, onOpenChange, activeGroup, onExpenseAdd
                </div>
             </div>
 
-            <div className="space-y-2">
-                <Label>Category</Label>
-                <Select value={category} onValueChange={setCategory}>
-                    <SelectTrigger>
-                        <SelectValue placeholder="Select Category" />
-                    </SelectTrigger>
-                    <SelectContent>
-                        {CATEGORIES.map(cat => (
-                            <SelectItem key={cat.id} value={cat.id}>
-                                <div className="flex items-center">
-                                    <cat.icon className="w-4 h-4 mr-2 opacity-50" />
-                                    {cat.label}
-                                </div>
-                            </SelectItem>
-                        ))}
-                    </SelectContent>
-                </Select>
+            <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                    <Label>Category</Label>
+                    <Select value={category} onValueChange={setCategory}>
+                        <SelectTrigger><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                            {CATEGORIES.map(cat => (
+                                <SelectItem key={cat.id} value={cat.id}>
+                                    <div className="flex items-center"><cat.icon className="w-4 h-4 mr-2 opacity-50" />{cat.label}</div>
+                                </SelectItem>
+                            ))}
+                        </SelectContent>
+                    </Select>
+                </div>
+                <div className="space-y-2">
+                    <Label>Payment Mode</Label>
+                    <Select value={paymentMode} onValueChange={setPaymentMode}>
+                        <SelectTrigger><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                            <SelectItem value="UPI"><div className="flex items-center"><Smartphone className="w-4 h-4 mr-2" /> UPI</div></SelectItem>
+                            <SelectItem value="Cash"><div className="flex items-center"><Wallet className="w-4 h-4 mr-2" /> Cash</div></SelectItem>
+                            <SelectItem value="Card"><div className="flex items-center"><CreditCard className="w-4 h-4 mr-2" /> Card</div></SelectItem>
+                        </SelectContent>
+                    </Select>
+                </div>
             </div>
 
             <div className="space-y-2">

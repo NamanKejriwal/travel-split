@@ -22,7 +22,6 @@ export function ActivityView({ activeGroup }: ActivityViewProps) {
     }
   }, [activeGroup])
 
-  // Filter Logic
   useEffect(() => {
     if (searchTerm.trim() === "") {
         setFilteredActivities(activities)
@@ -43,10 +42,7 @@ export function ActivityView({ activeGroup }: ActivityViewProps) {
     try {
       const { data, error } = await supabase
         .from('expenses')
-        .select(`
-            *,
-            profiles(full_name)
-        `)
+        .select(`*, profiles(full_name)`)
         .eq('group_id', activeGroup?.id)
         .order('created_at', { ascending: false })
       
@@ -60,24 +56,25 @@ export function ActivityView({ activeGroup }: ActivityViewProps) {
     }
   }
 
-  // --- PDF EXPORT LOGIC ---
+  // --- ENHANCED PDF EXPORT ---
   const handleDownloadPDF = () => {
     const printContent = `
       <html>
         <head>
-          <title>${activeGroup?.name || "Trip"} - Activity Report</title>
+          <title>${activeGroup?.name || "Trip"} - Detailed Report</title>
           <style>
-            body { font-family: sans-serif; padding: 20px; }
-            h1 { color: #059669; }
+            body { font-family: sans-serif; padding: 20px; font-size: 12px; }
+            h1 { color: #059669; border-bottom: 2px solid #eee; padding-bottom: 10px; }
             table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-            th, td { text-align: left; padding: 12px; border-bottom: 1px solid #ddd; }
-            th { background-color: #f3f4f6; }
-            .settlement { color: #2563eb; }
+            th, td { text-align: left; padding: 10px; border-bottom: 1px solid #ddd; }
+            th { background-color: #f3f4f6; color: #444; font-weight: bold; }
+            .settlement { color: #2563eb; font-style: italic; }
             .amount { text-align: right; font-weight: bold; }
+            .meta { color: #666; font-size: 10px; margin-top: 5px; }
           </style>
         </head>
         <body>
-          <h1>${activeGroup?.name || "Trip"} Report</h1>
+          <h1>${activeGroup?.name || "Trip"} Expense Report</h1>
           <p>Generated on: ${new Date().toLocaleDateString()}</p>
           <table>
             <thead>
@@ -86,18 +83,23 @@ export function ActivityView({ activeGroup }: ActivityViewProps) {
                 <th>Description</th>
                 <th>Category</th>
                 <th>Paid By</th>
+                <th>Mode</th>
                 <th>Amount</th>
               </tr>
             </thead>
             <tbody>
               ${activities.map(item => `
                 <tr>
-                  <td>${new Date(item.created_at).toLocaleString()}</td>
+                  <td>
+                    ${new Date(item.created_at).toLocaleDateString()}
+                    <div class="meta">${new Date(item.created_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</div>
+                  </td>
                   <td class="${item.is_settlement ? 'settlement' : ''}">
-                    ${item.is_settlement ? 'Settlement' : item.description}
+                    ${item.is_settlement ? 'Settlement / Payment' : item.description}
                   </td>
                   <td>${item.category || '-'}</td>
                   <td>${item.profiles?.full_name || 'Unknown'}</td>
+                  <td>${item.payment_mode || 'UPI'}</td>
                   <td class="amount">₹${Number(item.amount).toFixed(2)}</td>
                 </tr>
               `).join('')}
@@ -106,9 +108,7 @@ export function ActivityView({ activeGroup }: ActivityViewProps) {
         </body>
       </html>
     `
-    
-    // Open print window
-    const printWindow = window.open('', '', 'width=800,height=600')
+    const printWindow = window.open('', '', 'width=900,height=800')
     if (printWindow) {
         printWindow.document.write(printContent)
         printWindow.document.close()
@@ -138,7 +138,6 @@ export function ActivityView({ activeGroup }: ActivityViewProps) {
         </Button>
       </div>
 
-      {/* Search Bar */}
       <div className="relative">
         <Search className="absolute left-3 top-2.5 h-4 w-4 text-zinc-400" />
         <Input 
@@ -163,24 +162,22 @@ export function ActivityView({ activeGroup }: ActivityViewProps) {
                         <div className={`p-2.5 rounded-full shrink-0 ${item.is_settlement ? 'bg-blue-50 text-blue-600' : 'bg-emerald-50 text-emerald-600'}`}>
                             {item.is_settlement ? <ArrowRightLeft className="h-5 w-5" /> : <Receipt className="h-5 w-5" />}
                         </div>
-                        
                         <div className="flex-1 min-w-0">
                             <p className="font-medium text-zinc-900 truncate">
-                                {item.is_settlement 
-                                    ? <span className="text-blue-700">Payment made</span>
-                                    : item.description
-                                }
+                                {item.is_settlement ? <span className="text-blue-700">Payment made</span> : item.description}
                             </p>
                             <p className="text-xs text-zinc-500 truncate">
                                 {item.profiles?.full_name || "Unknown"} • {new Date(item.created_at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
                             </p>
                             {!item.is_settlement && item.category && (
-                                <span className="inline-block mt-1 text-[10px] bg-zinc-100 text-zinc-500 px-1.5 py-0.5 rounded border">
+                                <span className="inline-block mt-1 text-[10px] bg-zinc-100 text-zinc-500 px-1.5 py-0.5 rounded border mr-1">
                                     {item.category}
                                 </span>
                             )}
+                            <span className="inline-block mt-1 text-[10px] bg-zinc-100 text-zinc-500 px-1.5 py-0.5 rounded border">
+                                {item.payment_mode || "UPI"}
+                            </span>
                         </div>
-                        
                         <div className={`font-bold whitespace-nowrap ${item.is_settlement ? 'text-blue-600' : 'text-zinc-900'}`}>
                             ₹{Number(item.amount).toFixed(2)}
                         </div>
