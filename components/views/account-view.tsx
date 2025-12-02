@@ -5,7 +5,8 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from "@/components/ui/card"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
-import { Loader2, LogOut, User, Mail, Save } from "lucide-react"
+import { Switch } from "@/components/ui/switch"
+import { Loader2, LogOut, User, Mail } from "lucide-react"
 
 interface AccountViewProps {
   onLogout: () => void
@@ -17,6 +18,7 @@ export function AccountView({ onLogout }: AccountViewProps) {
   const [user, setUser] = useState<any>(null)
   const [fullName, setFullName] = useState("")
   const [email, setEmail] = useState("")
+  const [aiEnabled, setAiEnabled] = useState(false)
 
   useEffect(() => {
     getProfile()
@@ -32,12 +34,17 @@ export function AccountView({ onLogout }: AccountViewProps) {
 
       const { data, error } = await supabase
         .from('profiles')
-        .select('full_name')
+        .select('full_name, ai_alerts_enabled')
         .eq('id', user.id)
         .single()
 
+      if (error && error.code !== 'PGRST116') { // Ignore 'Row not found' error for new users
+          console.error("Error fetching profile:", error)
+      }
+
       if (data) {
         setFullName(data.full_name || "")
+        setAiEnabled(data.ai_alerts_enabled || false)
       }
     } catch (error) {
       console.error('Error loading user data!', error)
@@ -47,22 +54,28 @@ export function AccountView({ onLogout }: AccountViewProps) {
   }
 
   async function updateProfile() {
+    if (!user) return
     setSaving(true)
+    
     try {
+      const updates = {
+        id: user.id,
+        full_name: fullName,
+        email: email,
+        ai_alerts_enabled: aiEnabled,
+        // Removed updated_at to fix schema error
+      }
+
       const { error } = await supabase
         .from('profiles')
-        .upsert({
-          id: user.id,
-          full_name: fullName,
-          email: email, // Keep email in sync
-          updated_at: new Date().toISOString(),
-        })
+        .upsert(updates)
 
       if (error) throw error
-      alert('Profile updated!')
-    } catch (error) {
-      alert('Error updating the data!')
-      console.error(error)
+      alert('Profile updated successfully!')
+      
+    } catch (error: any) {
+      console.error("Update Error Details:", error)
+      alert(`Failed to update profile: ${error.message || 'Unknown error'}`)
     } finally {
       setSaving(false)
     }
@@ -116,9 +129,25 @@ export function AccountView({ onLogout }: AccountViewProps) {
                 />
             </div>
           </div>
+
+          {/* AI Toggle Section */}
+          <div className="flex items-center justify-between rounded-lg border p-3 shadow-sm bg-white mt-4">
+            <div className="space-y-0.5">
+                <Label className="text-base cursor-pointer" htmlFor="ai-mode">AI Budget Coach</Label>
+                <p className="text-xs text-muted-foreground">
+                Receive alerts when you overspend.
+                </p>
+            </div>
+            <Switch 
+                id="ai-mode"
+                checked={aiEnabled}
+                onCheckedChange={setAiEnabled}
+            />
+          </div>
+
         </CardContent>
         <CardFooter className="flex justify-end border-t pt-4">
-            <Button onClick={updateProfile} disabled={saving} className="bg-emerald-600 hover:bg-emerald-700">
+            <Button onClick={updateProfile} disabled={saving} className="bg-emerald-600 hover:bg-emerald-700 text-white">
                 {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                 {saving ? "Saving..." : "Save Changes"}
             </Button>

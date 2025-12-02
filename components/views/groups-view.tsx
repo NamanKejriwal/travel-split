@@ -1,11 +1,11 @@
 import { useEffect, useState } from "react"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardHeader, CardTitle, CardFooter } from "@/components/ui/card"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
 import { supabase } from "@/lib/supabaseClient"
-import { Plus, Users, Loader2, UserPlus, Copy, Check, Trash2, Eye } from "lucide-react"
+import { Plus, Users, Loader2, UserPlus, Copy, Check, Trash2, Eye, Settings, MapPin, Calendar, Wallet } from "lucide-react"
+import { TripSettingsDialog } from "@/components/trip-settings-dialog"
 
 export interface Group {
   id: string
@@ -13,6 +13,15 @@ export interface Group {
   created_at: string
   invite_code?: string
   created_by: string
+  budget_per_person?: number
+  destinations?: any[]
+  trip_type?: string
+  description?: string 
+  ai_alerts_enabled?: boolean
+  start_date?: string
+  end_date?: string
+  category_limits?: Record<string, number> 
+  ai_alerts?: any[] // ADDED THIS
 }
 
 interface GroupsViewProps {
@@ -24,21 +33,16 @@ export function GroupsView({ onSelectGroup }: GroupsViewProps) {
   const [loading, setLoading] = useState(true)
   const [currentUserId, setCurrentUserId] = useState<string>("")
   
-  // Create State
-  const [open, setOpen] = useState(false)
-  const [newGroupName, setNewGroupName] = useState("")
-  const [creating, setCreating] = useState(false)
+  const [tripDialogOpen, setTripDialogOpen] = useState(false)
+  const [editingGroup, setEditingGroup] = useState<Group | undefined>(undefined)
 
-  // Join State
   const [joinOpen, setJoinOpen] = useState(false)
   const [joinCode, setJoinCode] = useState("")
   const [joining, setJoining] = useState(false)
 
-  // Success State (After Create or View Code)
-  const [createdCode, setCreatedCode] = useState<string | null>(null)
+  const [viewCode, setViewCode] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
 
-  // 1. Fetch Groups from Supabase
   useEffect(() => {
     fetchGroups()
   }, [])
@@ -54,104 +58,47 @@ export function GroupsView({ onSelectGroup }: GroupsViewProps) {
         .select(`
           group_id,
           groups (
-            id,
-            name,
-            created_at,
-            invite_code,
-            created_by
+            id, name, created_at, invite_code, created_by,
+            budget_per_person, destinations, trip_type, description, ai_alerts_enabled, start_date, end_date, category_limits, ai_alerts
           )
         `)
         .eq('user_id', user.id)
 
       if (error) throw error
 
-      // FIXED: robust mapping to handle if 'groups' is returned as object or array
       // @ts-ignore
-      const formattedGroups = (data || []).map(item => {
-        const groupData = Array.isArray(item.groups) ? item.groups[0] : item.groups
-        return groupData
-      }).filter(Boolean) as Group[]
-
+      const formattedGroups = (data || []).map(item => Array.isArray(item.groups) ? item.groups[0] : item.groups).filter(Boolean) as Group[]
       setGroups(formattedGroups)
-    } catch (error: any) {
+    } catch (error) {
       console.error('Error fetching groups:', error)
     } finally {
       setLoading(false)
     }
   }
 
-  // 2. Create New Group Logic
-  async function handleCreateGroup(e: React.FormEvent) {
-    e.preventDefault()
-    setCreating(true)
-
-    try {
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) throw new Error("No user found")
-
-      // Step A: Insert the Group
-      const { data: groupData, error: groupError } = await supabase
-        .from('groups')
-        .insert({
-          name: newGroupName,
-          created_by: user.id
-        })
-        .select()
-        .single()
-
-      if (groupError) throw groupError
-      
-      if (!groupData) throw new Error("Group created but no ID returned.")
-
-      // Step B: Add YOU as the first member
-      const { error: memberError } = await supabase
-        .from('group_members')
-        .insert({
-          group_id: groupData.id,
-          user_id: user.id
-        })
-
-      if (memberError) throw memberError
-
-      // Step C: Success! Show code and refresh.
-      setNewGroupName("")
-      setOpen(false)
-      setCreatedCode(groupData.invite_code) // Show success dialog
-      fetchGroups()
-
-    } catch (error: any) {
-      console.error('Error creating group:', error)
-      alert(error.message || "Failed to create group.")
-    } finally {
-      setCreating(false)
-    }
+  const handleCreateClick = () => {
+    setEditingGroup(undefined)
+    setTripDialogOpen(true)
   }
 
-  // 3. Join Group Logic (Updated to use Secure Database Function)
+  const handleEditClick = (e: React.MouseEvent, group: Group) => {
+    e.stopPropagation()
+    setEditingGroup(group)
+    setTripDialogOpen(true)
+  }
+
   async function handleJoinGroup(e: React.FormEvent) {
     e.preventDefault()
     setJoining(true)
-
     try {
-      // Call the secure RPC function we created in SQL
-      // This bypasses RLS to check the code and adds the member safely
-      const { data, error } = await supabase.rpc('join_trip', { 
-        share_code: joinCode.trim() 
-      })
-
+      const { data, error } = await supabase.rpc('join_trip', { share_code: joinCode.trim() })
       if (error) throw error
+      if (data && !data.success) throw new Error(data.message)
 
-      // Check the custom response from our SQL function
-      if (data && !data.success) {
-        throw new Error(data.message)
-      }
-
-      // Success
       setJoinCode("")
       setJoinOpen(false)
       fetchGroups()
       alert("Successfully joined the trip!")
-
     } catch (error: any) {
       console.error('Error joining group:', error)
       alert(error.message || "Failed to join group.")
@@ -160,40 +107,28 @@ export function GroupsView({ onSelectGroup }: GroupsViewProps) {
     }
   }
 
-  // 4. Delete Group Logic
   async function handleDeleteGroup(groupId: string, e: React.MouseEvent) {
-    e.stopPropagation() // Prevent entering the group when clicking delete
-    
-    if (!confirm("Are you sure you want to delete this trip? This action cannot be undone and will remove all expenses.")) {
-        return
-    }
+    e.stopPropagation()
+    if (!confirm("Are you sure? This deletes all expenses and cannot be undone.")) return
 
     try {
-        const { error } = await supabase
-            .from('groups')
-            .delete()
-            .eq('id', groupId)
-
+        const { error } = await supabase.from('groups').delete().eq('id', groupId)
         if (error) throw error
-        
-        // Refresh list
         fetchGroups()
-
     } catch (error: any) {
         console.error("Error deleting group:", error)
-        alert("Failed to delete group. Make sure you have the 'Delete' policy enabled in Supabase.")
+        alert("Failed to delete group.")
     }
   }
 
-  // 5. View Code Logic
   const handleViewCode = (code: string | undefined, e: React.MouseEvent) => {
     e.stopPropagation()
-    if (code) setCreatedCode(code)
+    if (code) setViewCode(code)
   }
 
-  const copyCreatedCode = () => {
-    if (createdCode) {
-        navigator.clipboard.writeText(createdCode)
+  const copyCode = () => {
+    if (viewCode) {
+        navigator.clipboard.writeText(viewCode)
         setCopied(true)
         setTimeout(() => setCopied(false), 2000)
     }
@@ -203,9 +138,7 @@ export function GroupsView({ onSelectGroup }: GroupsViewProps) {
     <div className="space-y-4 pb-20 p-4">
       <div className="flex items-center justify-between">
         <h2 className="text-2xl font-bold tracking-tight">Your Trips</h2>
-        
         <div className="flex gap-2">
-            {/* JOIN GROUP DIALOG */}
             <Dialog open={joinOpen} onOpenChange={setJoinOpen}>
                 <DialogTrigger asChild>
                     <Button size="sm" variant="outline">
@@ -214,140 +147,137 @@ export function GroupsView({ onSelectGroup }: GroupsViewProps) {
                 </DialogTrigger>
                 <DialogContent>
                     <DialogHeader>
-                        <DialogTitle>Join an existing trip</DialogTitle>
-                        <DialogDescription>
-                            Enter the 6-character code shared by your friend.
-                        </DialogDescription>
+                        <DialogTitle>Join a Trip</DialogTitle>
+                        <DialogDescription>Enter the 6-character invite code.</DialogDescription>
                     </DialogHeader>
                     <form onSubmit={handleJoinGroup} className="space-y-4">
-                        <div className="space-y-2">
-                            <Label htmlFor="code">Invite Code</Label>
-                            <Input 
-                                id="code" 
-                                placeholder="e.g. x7k9p2" 
-                                value={joinCode}
-                                onChange={(e) => setJoinCode(e.target.value)}
-                                maxLength={6}
-                                className="font-mono tracking-widest"
-                                required
-                            />
-                        </div>
+                        <Input 
+                            placeholder="e.g. x7k9p2" 
+                            value={joinCode}
+                            onChange={(e) => setJoinCode(e.target.value)}
+                            maxLength={6}
+                            className="font-mono tracking-widest text-center text-lg uppercase"
+                            required
+                        />
                         <DialogFooter>
-                            <Button type="submit" disabled={joining}>
+                            <Button type="submit" disabled={joining} className="w-full">
                                 {joining && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                                {joining ? "Joining..." : "Join Trip"}
+                                Join Trip
                             </Button>
                         </DialogFooter>
                     </form>
                 </DialogContent>
             </Dialog>
-
-            {/* CREATE GROUP DIALOG */}
-            <Dialog open={open} onOpenChange={setOpen}>
-            <DialogTrigger asChild>
-                <Button size="sm" className="bg-emerald-600 hover:bg-emerald-700">
+            <Button size="sm" className="bg-emerald-600 hover:bg-emerald-700" onClick={handleCreateClick}>
                 <Plus className="mr-2 h-4 w-4" /> New
-                </Button>
-            </DialogTrigger>
-            <DialogContent>
-                <DialogHeader>
-                <DialogTitle>Create a new trip</DialogTitle>
-                <DialogDescription>
-                    Start tracking expenses for a new adventure.
-                </DialogDescription>
-                </DialogHeader>
-                <form onSubmit={handleCreateGroup} className="space-y-4">
-                <div className="space-y-2">
-                    <Label htmlFor="name">Trip Name</Label>
-                    <Input 
-                    id="name" 
-                    placeholder="e.g. Goa 2024" 
-                    value={newGroupName}
-                    onChange={(e) => setNewGroupName(e.target.value)}
-                    required
-                    />
-                </div>
-                <DialogFooter>
-                    <Button type="submit" disabled={creating}>
-                    {creating && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                    {creating ? "Creating..." : "Create Trip"}
-                    </Button>
-                </DialogFooter>
-                </form>
-            </DialogContent>
-            </Dialog>
+            </Button>
         </div>
       </div>
 
-      {/* SUCCESS/VIEW CODE DIALOG */}
-      <Dialog open={!!createdCode} onOpenChange={(val) => !val && setCreatedCode(null)}>
+      <TripSettingsDialog 
+        open={tripDialogOpen} 
+        onOpenChange={setTripDialogOpen} 
+        existingGroup={editingGroup}
+        onSuccess={fetchGroups}
+      />
+
+      <Dialog open={!!viewCode} onOpenChange={(val) => !val && setViewCode(null)}>
         <DialogContent>
             <DialogHeader>
                 <DialogTitle className="text-center text-emerald-600">Invite Code</DialogTitle>
-                <DialogDescription className="text-center">
-                    Share this code with friends so they can join this trip.
-                </DialogDescription>
+                <DialogDescription className="text-center">Share this with friends.</DialogDescription>
             </DialogHeader>
-            <div className="flex items-center justify-center space-x-2 my-4">
-                <div className="bg-zinc-100 px-6 py-3 rounded-lg text-2xl font-mono tracking-widest font-bold border border-zinc-200">
-                    {createdCode}
-                </div>
+            <div className="bg-zinc-100 p-4 rounded-lg text-3xl font-mono font-bold text-center tracking-widest border border-zinc-200">
+                {viewCode}
             </div>
-            <Button className="w-full" onClick={copyCreatedCode}>
+            <Button className="w-full" onClick={copyCode}>
                 {copied ? <Check className="mr-2 h-4 w-4" /> : <Copy className="mr-2 h-4 w-4" />}
-                {copied ? "Copied to Clipboard" : "Copy Code"}
+                {copied ? "Copied" : "Copy Code"}
             </Button>
         </DialogContent>
       </Dialog>
 
-      {/* LIST OF GROUPS */}
       {loading ? (
-        <div className="flex justify-center p-8"><Loader2 className="animate-spin" /></div>
+        <div className="flex justify-center p-8"><Loader2 className="animate-spin text-zinc-400" /></div>
       ) : groups.length === 0 ? (
         <Card>
           <CardContent className="flex flex-col items-center justify-center py-10 text-center">
             <Users className="h-10 w-10 text-zinc-300 mb-4" />
-            <p className="text-zinc-500">You haven't joined any trips yet.</p>
+            <p className="text-zinc-500">No trips yet.</p>
           </CardContent>
         </Card>
       ) : (
         <div className="grid gap-4">
           {groups.map((group) => {
             const isCreator = group.created_by === currentUserId
+            const destCount = Array.isArray(group.destinations) ? group.destinations.length : 0
+            
             return (
                 <Card 
-                key={group.id} 
-                className="cursor-pointer hover:bg-zinc-50 transition-colors relative group"
-                onClick={() => onSelectGroup?.(group)}
+                    key={group.id} 
+                    className="cursor-pointer hover:bg-zinc-50 transition-colors group relative"
+                    onClick={() => onSelectGroup?.(group)}
                 >
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                    <CardTitle className="text-lg font-semibold">{group.name}</CardTitle>
-                    <Users className="h-4 w-4 text-zinc-400" />
-                </CardHeader>
-                <CardContent>
-                    <p className="text-xs text-zinc-500 mb-2">Created {new Date(group.created_at).toLocaleDateString()}</p>
-                    
-                    {/* Creator Actions */}
+                <CardHeader className="flex flex-row items-start justify-between space-y-0 pb-2">
+                    <div>
+                        <CardTitle className="text-lg font-semibold">{group.name}</CardTitle>
+                        {destCount > 0 && (
+                            <div className="flex items-center text-xs text-zinc-500 mt-1">
+                                <MapPin className="w-3 h-3 mr-1" />
+                                {group.destinations?.[0]?.name} {destCount > 1 ? `+${destCount - 1} more` : ''}
+                            </div>
+                        )}
+                        {group.start_date && (
+                            <div className="flex items-center text-xs text-zinc-400 mt-1">
+                                <Calendar className="w-3 h-3 mr-1" />
+                                {new Date(group.start_date).toLocaleDateString()}
+                            </div>
+                        )}
+                    </div>
                     {isCreator && (
-                        <div className="flex gap-2 mt-3 pt-3 border-t border-zinc-100">
-                             <Button 
-                                variant="outline" 
+                        <div className="flex flex-col gap-2">
+                            <Button 
+                                variant="secondary"
                                 size="sm" 
-                                className="h-8 text-xs flex-1"
-                                onClick={(e) => handleViewCode(group.invite_code, e)}
-                             >
-                                <Eye className="w-3 h-3 mr-1" /> View Code
-                             </Button>
-                             <Button 
-                                variant="outline" 
-                                size="sm" 
-                                className="h-8 text-xs text-red-500 hover:text-red-600 hover:bg-red-50"
-                                onClick={(e) => handleDeleteGroup(group.id, e)}
-                             >
-                                <Trash2 className="w-3 h-3 mr-1" /> Delete
-                             </Button>
+                                className="h-8 px-3 text-xs border border-zinc-200"
+                                onClick={(e) => handleEditClick(e, group)}
+                            >
+                                <Settings className="w-4 h-4 mr-1" /> Details
+                            </Button>
                         </div>
                     )}
+                </CardHeader>
+                <CardContent>
+                    <div className="flex justify-between items-end mt-2 pt-2 border-t border-zinc-100">
+                        {group.budget_per_person && group.budget_per_person > 0 ? (
+                            <span className="text-xs font-medium px-2 py-1 bg-emerald-100 text-emerald-700 rounded-full flex items-center">
+                                <Wallet className="w-3 h-3 mr-1" /> ₹{group.budget_per_person}/person
+                            </span>
+                        ) : <span />}
+                        
+                        {isCreator && (
+                            <div className="flex gap-2">
+                                <Button 
+                                    variant="ghost" 
+                                    size="icon" 
+                                    className="h-7 w-7 text-zinc-400"
+                                    onClick={(e) => handleViewCode(group.invite_code, e)}
+                                    title="Invite Code"
+                                >
+                                    <Eye className="w-4 h-4" />
+                                </Button>
+                                <Button 
+                                    variant="ghost" 
+                                    size="icon" 
+                                    className="h-7 w-7 text-red-300 hover:text-red-500"
+                                    onClick={(e) => handleDeleteGroup(group.id, e)}
+                                    title="Delete Trip"
+                                >
+                                    <Trash2 className="w-4 h-4" />
+                                </Button>
+                            </div>
+                        )}
+                    </div>
                 </CardContent>
                 </Card>
             )

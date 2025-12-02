@@ -8,13 +8,12 @@ const _geist = Geist({ subsets: ["latin"] })
 const _geistMono = Geist_Mono({ subsets: ["latin"] })
 
 export const metadata: Metadata = {
-  title: "TravelSplit - Split Expenses with Friends",
-  description: "Easy expense sharing for your trips and group activities",
-  generator: "v0.app",
+  title: "TravelSplit",
+  description: "Smart expense sharing",
 }
 
 export const viewport: Viewport = {
-  themeColor: "#14b8a6",
+  themeColor: "#10b981",
   width: "device-width",
   initialScale: 1,
   maximumScale: 1,
@@ -27,8 +26,9 @@ export default function RootLayout({
   children: React.ReactNode
 }>) {
   return (
-    <html lang="en">
-      <body className="font-sans antialiased">
+    // Forced light mode
+    <html lang="en" className="light" style={{ colorScheme: 'light' }}>
+      <body className="font-sans antialiased bg-zinc-50 text-zinc-900">
         {children}
         <Analytics />
       </body>

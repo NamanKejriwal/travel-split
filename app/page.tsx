@@ -13,16 +13,12 @@ import { AddExpenseDrawer, ExpenseToEdit } from "@/components/add-expense-drawer
 import { SettleUpDialog } from "@/components/settle-up-dialog"
 import { ProfileSetupView } from "@/components/views/profile-setup-view"
 import { supabase } from "@/lib/supabaseClient"
-import { Toaster, toast } from "sonner"
-import { Loader2 } from "lucide-react"
 
 type View = "landing" | "login" | "signup" | "profile-setup" | "app"
 type Tab = "dashboard" | "activity" | "groups" | "account" | "balance"
 
 export default function Home() {
   const [currentView, setCurrentView] = useState<View>("landing")
-  const [isGlobalLoading, setIsGlobalLoading] = useState(true)
-  const [loadingStatus, setLoadingStatus] = useState("Initializing...")
   const [activeTab, setActiveTab] = useState<Tab>("dashboard")
   
   const [addExpenseOpen, setAddExpenseOpen] = useState(false)
@@ -31,167 +27,64 @@ export default function Home() {
   
   const [refreshKey, setRefreshKey] = useState(0)
   const [activeGroup, setActiveGroup] = useState<Group | null>(null)
-
-  // Helper to detect if we are currently processing a Google Redirect
-  const isUrlRedirect = () => {
-    if (typeof window === "undefined") return false
-    return (
-        window.location.hash.includes("access_token") || 
-        window.location.hash.includes("type=recovery") ||
-        window.location.search.includes("code=")
-    )
-  }
+  
+  // State for AI Feedback
+  const [isAIAnalyzing, setIsAIAnalyzing] = useState(false)
+  const [latestTip, setLatestTip] = useState<string | null>(null)
 
   useEffect(() => {
-    let mounted = true
-    console.log("App mounted. Checking auth...")
-
-    // 1. IMMEDIATE CHECK: Are we waiting for a redirect?
-    if (isUrlRedirect()) {
-        setLoadingStatus("Verifying account...")
-        setIsGlobalLoading(true)
-    }
-
-    const initAuth = async () => {
-      try {
-        // 2. Check Session
-        const { data: { session }, error } = await supabase.auth.getSession()
-
-        if (error) {
-           if (error.message !== 'Auth session missing!') console.warn("Session error:", error.message)
-           // Only force landing if we definitely failed and aren't redirecting
-           if (!isUrlRedirect() && mounted) {
-               setCurrentView("landing")
-               setIsGlobalLoading(false)
-           }
-           return
-        }
-
-        if (session) {
-           // 3. SUCCESS: We have a session! Ignore redirect flags and load app.
-           if (mounted) await checkProfileAndNavigate(session.user.id)
-        } else {
-           // 4. No Session found.
-           if (!isUrlRedirect() && mounted) {
-              setCurrentView("landing")
-              setIsGlobalLoading(false)
-           } else {
-              console.log("Redirect detected. Waiting for auth listener...")
-           }
-        }
-      } catch (err) {
-        console.error("Auth check failed", err)
-        if (mounted) setIsGlobalLoading(false)
+    const checkSession = async () => {
+      const { data: { session } } = await supabase.auth.getSession()
+      if (session) {
+        checkProfileAndNavigate()
       }
     }
-
-    initAuth()
-
-    // 5. Listener for Auth Events (Handles Google Login completion)
-    const { data: authListener } = supabase.auth.onAuthStateChange(async (event, session) => {
-        console.log("Auth Event:", event)
-        
-        if (event === 'SIGNED_IN' || event === 'INITIAL_SESSION') {
-            if (session && mounted) {
-                await checkProfileAndNavigate(session.user.id)
-            }
-        } else if (event === 'SIGNED_OUT') {
-             if (mounted && !isUrlRedirect()) {
-                 setCurrentView("landing")
-                 setActiveGroup(null)
-                 setIsGlobalLoading(false)
-                 localStorage.removeItem("lastActiveGroupId")
-             }
-        }
-    })
-
-    return () => {
-        mounted = false
-        authListener.subscription.unsubscribe()
-    }
+    checkSession()
   }, [])
 
-  // Safety Timeout (8s)
-  useEffect(() => {
-    if (isGlobalLoading) {
-        const timer = setTimeout(() => {
-            if (isGlobalLoading) {
-                console.log("Auth timeout. Assuming public user.")
-                setIsGlobalLoading(false)
-                setCurrentView((prev) => prev === 'app' ? 'app' : 'landing')
-            }
-        }, 8000)
-        return () => clearTimeout(timer)
-    }
-  }, [isGlobalLoading])
-
-  // Auto-Refresh Logic
-  useEffect(() => {
-    const handleVisibilityChange = () => {
-        if (document.visibilityState === 'visible') setRefreshKey(prev => prev + 1)
-    }
-    document.addEventListener("visibilitychange", handleVisibilityChange)
-    return () => document.removeEventListener("visibilitychange", handleVisibilityChange)
-  }, [])
-
-  // Realtime Logic
-  useEffect(() => {
-    if (!activeGroup) return
-    const channel = supabase
-      .channel('realtime expenses')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'expenses', filter: `group_id=eq.${activeGroup.id}` }, () => {
-          setRefreshKey(prev => prev + 1)
-      })
-      .subscribe()
-    return () => { supabase.removeChannel(channel) }
-  }, [activeGroup])
-
-  const checkProfileAndNavigate = async (userId: string) => {
-    setLoadingStatus("Loading profile...")
-    
+  const checkProfileAndNavigate = async () => {
     try {
-      const { data: profile } = await supabase.from('profiles').select('full_name').eq('id', userId).single()
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) {
+        setCurrentView("login")
+        return
+      }
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('full_name')
+        .eq('id', user.id)
+        .single()
 
       if (profile && profile.full_name) {
         setCurrentView("app")
-        
-        // Optional: Restore last group
-        const lastGroupId = localStorage.getItem("lastActiveGroupId")
-        if (lastGroupId && !activeGroup) {
-             const { data: group } = await supabase.from('groups').select('*').eq('id', lastGroupId).single()
-             if (group) {
-                 setActiveGroup(group)
-                 setActiveTab("dashboard")
-             }
-        }
       } else {
         setCurrentView("profile-setup")
       }
     } catch (error) {
       console.error("Profile check failed:", error)
-      setCurrentView("profile-setup") 
-    } finally {
-      setIsGlobalLoading(false)
+      setCurrentView("app") 
     }
   }
 
-  // Handlers
   const handleGetStarted = () => setCurrentView("signup")
-  const handleAuthSuccess = () => { /* Listener handles navigation */ }
+  const handleAuthSuccess = () => checkProfileAndNavigate()
   const handleSwitchToLogin = () => setCurrentView("login")
   const handleSwitchToSignup = () => setCurrentView("signup")
   const handleBackToLanding = () => setCurrentView("landing")
   
-  const handleLogout = async () => {
-    await supabase.auth.signOut()
+  const handleLogout = () => {
+    setCurrentView("landing")
+    setActiveTab("dashboard")
+    setActiveGroup(null) 
   }
 
-  const handleTabChange = (tab: string) => setActiveTab(tab as Tab)
+  const handleTabChange = (tab: string) => {
+    setActiveTab(tab as Tab)
+  }
 
   const handleGroupSelect = (group: Group) => {
     setActiveGroup(group)       
     setActiveTab("dashboard")   
-    localStorage.setItem("lastActiveGroupId", group.id)
   }
 
   const handleSettleUp = () => setSettleUpOpen(true)
@@ -208,20 +101,40 @@ export default function Home() {
 
   const handleDrawerChange = (open: boolean) => {
     setAddExpenseOpen(open)
-    if (!open) setTimeout(() => setExpenseToEdit(null), 300) 
+    if (!open) {
+        setTimeout(() => setExpenseToEdit(null), 300) 
+    }
   }
 
-  const handleExpenseAdded = () => {
+  // Called immediately when expense saves (starts spinner)
+  const handleExpenseAdded = (triggerAI: boolean = false) => {
+      if (triggerAI) {
+          setIsAIAnalyzing(true)
+          setLatestTip(null) // Clear old tip while thinking
+      }
       setRefreshKey(prev => prev + 1) 
       setAddExpenseOpen(false) 
-      toast.success("Saved successfully")
+  }
+
+  // Called when AI finishes (stops spinner, sets tip)
+  const handleAnalysisComplete = (tip?: string) => {
+      setIsAIAnalyzing(false)
+      if (tip) setLatestTip(tip)
+      setRefreshKey(prev => prev + 1) 
   }
 
   const renderAppTab = () => {
     switch (activeTab) {
       case "dashboard":
         // @ts-ignore
-        return <Dashboard key={refreshKey} activeGroup={activeGroup} onSettleUp={handleSettleUp} onEditExpense={handleEditExpense} />
+        return <Dashboard 
+          key={refreshKey} 
+          activeGroup={activeGroup} 
+          onSettleUp={handleSettleUp} 
+          onEditExpense={handleEditExpense}
+          isAnalyzing={isAIAnalyzing}
+          latestTip={latestTip}
+        />
       case "balance":
         // @ts-ignore
         return <BalanceView key={refreshKey} activeGroup={activeGroup} onSettleUp={handleSettleUp} />
@@ -238,50 +151,52 @@ export default function Home() {
     }
   }
 
-  if (isGlobalLoading) {
-      return (
-          <div className="flex min-h-screen items-center justify-center bg-zinc-50">
-              <div className="flex flex-col items-center gap-4">
-                  <Loader2 className="h-8 w-8 animate-spin text-emerald-600" />
-                  <p className="text-zinc-500 text-sm animate-pulse">{loadingStatus}</p>
-              </div>
-          </div>
-      )
+  if (currentView === "landing") {
+    return <LandingView onGetStarted={handleGetStarted} />
   }
 
-  if (currentView === "landing") return <LandingView onGetStarted={handleGetStarted} />
-  if (currentView === "login") return <AuthView mode="login" onSubmit={handleAuthSuccess} onSwitchMode={handleSwitchToSignup} onBack={handleBackToLanding} />
-  if (currentView === "signup") return <AuthView mode="signup" onSubmit={handleAuthSuccess} onSwitchMode={handleSwitchToLogin} onBack={handleBackToLanding} />
-  if (currentView === "profile-setup") return <ProfileSetupView onComplete={() => setCurrentView("app")} />
+  if (currentView === "login") {
+    return (
+      <AuthView mode="login" onSubmit={handleAuthSuccess} onSwitchMode={handleSwitchToSignup} onBack={handleBackToLanding} />
+    )
+  }
+
+  if (currentView === "signup") {
+    return (
+      <AuthView mode="signup" onSubmit={handleAuthSuccess} onSwitchMode={handleSwitchToLogin} onBack={handleBackToLanding} />
+    )
+  }
+
+  if (currentView === "profile-setup") {
+    return <ProfileSetupView onComplete={() => setCurrentView("app")} />
+  }
 
   return (
-    <>
-        <Toaster position="top-center" />
-        <AppLayout
-        activeTab={activeTab}
-        onTabChange={handleTabChange}
-        addExpenseOpen={addExpenseOpen}
-        setAddExpenseOpen={handleOpenAddExpense} 
-        settleUpOpen={settleUpOpen}
-        setSettleUpOpen={setSettleUpOpen}
-        >
-        {renderAppTab()}
+    <AppLayout
+      activeTab={activeTab}
+      onTabChange={handleTabChange}
+      addExpenseOpen={addExpenseOpen}
+      setAddExpenseOpen={handleOpenAddExpense} 
+      settleUpOpen={settleUpOpen}
+      setSettleUpOpen={setSettleUpOpen}
+    >
+      {renderAppTab()}
 
-        <AddExpenseDrawer 
-            open={addExpenseOpen} 
-            onOpenChange={handleDrawerChange}
-            activeGroup={activeGroup}
-            onExpenseAdded={handleExpenseAdded}
-            expenseToEdit={expenseToEdit}
-        />
+      <AddExpenseDrawer 
+        open={addExpenseOpen} 
+        onOpenChange={handleDrawerChange}
+        activeGroup={activeGroup}
+        onExpenseAdded={handleExpenseAdded}
+        onAnalysisComplete={handleAnalysisComplete}
+        expenseToEdit={expenseToEdit}
+      />
 
-        <SettleUpDialog 
-            open={settleUpOpen}
-            onOpenChange={setSettleUpOpen}
-            activeGroup={activeGroup}
-            onSettled={handleExpenseAdded}
-        />
-        </AppLayout>
-    </>
+      <SettleUpDialog 
+        open={settleUpOpen}
+        onOpenChange={setSettleUpOpen}
+        activeGroup={activeGroup}
+        onSettled={() => handleExpenseAdded(false)}
+      />
+    </AppLayout>
   )
 }
