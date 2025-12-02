@@ -33,7 +33,7 @@ export function TripSettingsDialog({ open, onOpenChange, existingGroup, onSucces
   const [loading, setLoading] = useState(false)
   const [generatingLimits, setGeneratingLimits] = useState(false)
 
-  // Load data logic
+  // Load data
   useEffect(() => {
     if (open) {
       if (existingGroup) {
@@ -128,6 +128,7 @@ export function TripSettingsDialog({ open, onOpenChange, existingGroup, onSucces
       }
 
       // 2. Trigger AI Limit Generation
+      // IMPORTANT: Only trigger if enabled AND budget exists
       if (aiEnabled && payload.budget_per_person > 0 && groupId) {
         setGeneratingLimits(true)
         try {
@@ -143,17 +144,18 @@ export function TripSettingsDialog({ open, onOpenChange, existingGroup, onSucces
             console.log("AI Response:", limits)
 
             if (limits && !limits.error) {
-                // Save limits to DB with count check to verify RLS
-                const { error: limitError, count } = await supabase
+                // Save limits to DB - Simplified select call to avoid type error
+                const { data: updateData, error: limitError } = await supabase
                     .from('groups')
                     .update({ category_limits: limits })
                     .eq('id', groupId)
-                    .select('id', { count: 'exact' }) // Ensure we verify the row was touched
+                    .select('id') // Removed count option to fix build error
                 
                 if (limitError) {
                     console.error("Limit Save Error (Supabase):", limitError)
                     alert("AI generated limits but failed to save to database. Check permissions.")
-                } else if (count === 0) {
+                } else if (!updateData || updateData.length === 0) {
+                     // If data is empty, it means no rows were updated (RLS issue)
                     console.error("Limit Save Warning: 0 rows updated. Check RLS policies.")
                     alert("Database permission denied. You might not have access to update this group.")
                 } else {
