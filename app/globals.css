@@ -130,3 +130,23 @@
     @apply bg-background text-foreground;
   }
 }
+/* Optimize touch interactions */
+@media (hover: none) and (pointer: coarse) {
+  button, [role="button"], a {
+    -webkit-tap-highlight-color: transparent;
+    min-height: 44px; /* Apple's recommended tap target */
+  }
+}
+
+/* Smooth scrolling for dialogs */
+[role="dialog"] {
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Better text rendering on mobile */
+@media (max-width: 640px) {
+  body {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+}
