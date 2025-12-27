@@ -1,6 +1,8 @@
+"use client"
+
 import { ReactNode } from "react"
-import { Button } from "@/components/ui/button"
-import { Home, List, Users, User, Plus, Scale } from "lucide-react"
+import { BottomNav } from "@/components/bottom-nav"
+import { FabButton } from "@/components/fab-button"
 
 interface AppLayoutProps {
   children: ReactNode
@@ -16,81 +18,56 @@ export function AppLayout({
   children,
   activeTab,
   onTabChange,
-  addExpenseOpen,
   setAddExpenseOpen,
-  settleUpOpen,
-  setSettleUpOpen,
 }: AppLayoutProps) {
-  
   return (
-    <div className="flex min-h-screen flex-col bg-zinc-50 max-w-md mx-auto border-x shadow-2xl relative">
-      <main className="flex-1 overflow-y-auto">
-        {children}
-      </main>
+    // ROOT CONTAINER
+    // - bg-[#020617]: Matches your deep navy theme
+    // - flex justify-center: Centers the "Mobile App" on desktop screens
+    <div className="min-h-screen w-full bg-[#020617] text-white flex justify-center overflow-hidden relative selection:bg-[#00A896] selection:text-white">
+      
+      {/* 1. NOISE TEXTURE (The Premium Detail) */}
+      {/* Make sure you added the .bg-noise class to your globals.css as discussed! */}
+      <div className="bg-noise" />
 
-      {/* FAB - Add Expense (Floating Button) */}
-      <div className="absolute bottom-20 right-4 z-50">
-        <Button 
-            size="icon" 
-            className="h-14 w-14 rounded-full bg-emerald-600 hover:bg-emerald-700 shadow-lg"
-            onClick={() => setAddExpenseOpen(true)}
-        >
-            <Plus className="h-6 w-6 text-white" />
-        </Button>
-      </div>
+      {/* MAIN APP CONTAINER 
+         - 'relative z-10': Sits above the background noise
+         - 'max-w-lg': Enforces mobile width on desktop (looks like a phone app)
+         - 'border-x': Subtle border on desktop to define edges
+      */}
+      <main className="w-full max-w-lg relative z-10 bg-[#020617] min-h-screen flex flex-col border-x border-white/5 shadow-2xl">
+        
+        {/* Scrollable Content Area 
+           - flex-1: Takes up all available space
+           - pb-28: Ensures content isn't hidden behind the bottom nav/FAB
+        */}
+        <div className="flex-1 overflow-y-auto custom-scrollbar pb-28 scroll-smooth">
+          {children}
+        </div>
 
-      {/* Bottom Navigation */}
-      <nav className="border-t bg-white sticky bottom-0 z-40 pb-safe">
-        <div className="flex items-center justify-around h-16 px-2">
-          
-          <NavButton 
-            active={activeTab === "dashboard"} 
-            onClick={() => onTabChange("dashboard")} 
-            icon={<Home className="h-5 w-5" />} 
-            label="Home" 
-          />
-          
-          <NavButton 
-            active={activeTab === "balance"} 
-            onClick={() => onTabChange("balance")} 
-            icon={<Scale className="h-5 w-5" />} 
-            label="Balances" 
-          />
-
-          <NavButton 
-            active={activeTab === "activity"} 
-            onClick={() => onTabChange("activity")} 
-            icon={<List className="h-5 w-5" />} 
-            label="Activity" 
-          />
-
-          <NavButton 
-            active={activeTab === "groups"} 
-            onClick={() => onTabChange("groups")} 
-            icon={<Users className="h-5 w-5" />} 
-            label="Groups" 
-          />
-
-          <NavButton 
-            active={activeTab === "account"} 
-            onClick={() => onTabChange("account")} 
-            icon={<User className="h-5 w-5" />} 
-            label="Account" 
+        {/* FLOATING ACTION BUTTON (FAB)
+           - Positioned ABSOLUTE relative to the max-w-lg container.
+           - This ensures it stays centered with the app on desktop, 
+             rather than floating to the far right of the monitor.
+        */}
+        <div className="absolute bottom-24 right-6 z-50 pointer-events-auto">
+          <FabButton 
+            onClick={() => setAddExpenseOpen(true)} 
+            activeTab={activeTab} 
           />
         </div>
-      </nav>
+
+        {/* BOTTOM NAVIGATION
+           - Absolute bottom of the container
+        */}
+        <div className="absolute bottom-0 left-0 right-0 z-40">
+           <BottomNav 
+             activeTab={activeTab} 
+             onTabChange={onTabChange} 
+           />
+        </div>
+        
+      </main>
     </div>
   )
-}
-
-function NavButton({ active, onClick, icon, label }: { active: boolean, onClick: () => void, icon: ReactNode, label: string }) {
-    return (
-        <button 
-            onClick={onClick} 
-            className={`flex flex-col items-center justify-center w-full h-full space-y-1 ${active ? "text-emerald-600" : "text-zinc-400 hover:text-zinc-600"}`}
-        >
-            {icon}
-            <span className="text-[10px] font-medium">{label}</span>
-        </button>
-    )
 }
