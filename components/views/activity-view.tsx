@@ -523,7 +523,7 @@ export function ActivityView({ activeGroup, onEditExpense }: ActivityViewProps) 
                 </Button>
                 <Button 
                     size="sm" 
-                    onClick={() => exportToExcel(activities, activeGroup?.name || 'Trip', true)}
+                    onClick={() => exportToExcel(activities, activeGroup?.name || 'Trip')}
                     className="flex-1 sm:flex-none bg-[#00A896]/10 border border-[#00A896]/50 text-[#00A896] hover:bg-[#00A896]/20 rounded-full text-xs"
                 >
                     <FileSpreadsheet className="h-3 w-3 mr-2" /> Excel
