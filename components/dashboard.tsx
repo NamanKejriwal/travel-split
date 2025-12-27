@@ -267,69 +267,74 @@ export function Dashboard({ activeGroup, onSettleUp, onEditExpense, isAnalyzing,
   }
 
   // --- RENDER HELPERS ---
-  const renderPieChart = () => {
-    if (totalCost === 0) return null
-    let cumulativePercent = 0
-    const paths = categoryStats.map((stat, i) => {
-        const percent = stat.value / totalCost
-        const startX = Math.cos(2 * Math.PI * cumulativePercent)
-        const startY = Math.sin(2 * Math.PI * cumulativePercent)
-        cumulativePercent += percent
-        const endX = Math.cos(2 * Math.PI * cumulativePercent)
-        const endY = Math.sin(2 * Math.PI * cumulativePercent)
-        const largeArcFlag = percent > 0.5 ? 1 : 0
-        if (percent === 1) return <circle key={i} cx="0" cy="0" r="1" fill={stat.color} />
-        const pathData = `M 0 0 L ${startX} ${startY} A 1 1 0 ${largeArcFlag} 1 ${endX} ${endY} Z`
-        
-        return (
-            <motion.path 
-                key={i} 
-                d={pathData} 
-                fill={stat.color} 
-                initial={{ opacity: 0, scale: 0.8 }}
-                animate={{ opacity: 0.9, scale: 1 }}
-                transition={{ duration: 0.5, delay: i * 0.1, ease: "easeOut" }}
-                whileHover={{ opacity: 1, scale: 1.05 }}
-                className="transition-opacity" 
-            />
-        )
-    })
+// --- RENDER HELPERS ---
+const renderPieChart = () => {
+  if (totalCost === 0) return null
+  let cumulativePercent = 0
+  const paths = categoryStats.map((stat, i) => {
+      const percent = stat.value / totalCost
+      const startX = Math.cos(2 * Math.PI * cumulativePercent)
+      const startY = Math.sin(2 * Math.PI * cumulativePercent)
+      cumulativePercent += percent
+      const endX = Math.cos(2 * Math.PI * cumulativePercent)
+      const endY = Math.sin(2 * Math.PI * cumulativePercent)
+      const largeArcFlag = percent > 0.5 ? 1 : 0
+      if (percent === 1) return <circle key={i} cx="0" cy="0" r="1" fill={stat.color} />
+      const pathData = `M 0 0 L ${startX} ${startY} A 1 1 0 ${largeArcFlag} 1 ${endX} ${endY} Z`
+      
+      return (
+          <motion.path 
+              key={i} 
+              d={pathData} 
+              fill={stat.color} 
+              initial={{ opacity: 0, scale: 0.8 }}
+              animate={{ opacity: 0.9, scale: 1 }}
+              transition={{ duration: 0.5, delay: i * 0.1, ease: "easeOut" }}
+              whileHover={{ opacity: 1, scale: 1.05 }}
+              className="transition-opacity" 
+          />
+      )
+  })
 
-    return (
-        <div className="flex flex-col sm:flex-row gap-8 items-center justify-center py-2">
-            <div className="relative w-40 h-40 shrink-0 filter drop-shadow-[0_0_10px_rgba(45,212,191,0.2)]">
-                <svg viewBox="-1 -1 2 2" style={{ transform: 'rotate(-90deg)' }} className="w-full h-full">
-                    {paths}
-                </svg>
-                <div className="absolute inset-0 m-auto w-24 h-24 bg-[#020617] rounded-full flex flex-col items-center justify-center border border-white/10 shadow-inner z-10">
-                    <span className="text-[10px] text-zinc-500 font-medium uppercase tracking-wider">Total</span>
-                    <span className="text-sm font-bold text-white">
-                        <AnimatedNumber value={totalCost} />
-                    </span>
-                </div>
-            </div>
-            
-            <div className="flex-1 w-full grid grid-cols-2 gap-3 text-xs">
-                {categoryStats.map((stat, i) => (
-                    <motion.div 
-                        key={i} 
-                        initial={{ opacity: 0, x: -10 }}
-                        animate={{ opacity: 1, x: 0 }}
-                        transition={{ delay: 0.3 + (i * 0.05) }}
-                        className="flex items-center justify-between p-2 rounded-lg bg-white/5 border border-white/5 hover:bg-white/10 transition-colors"
-                    >
-                        <div className="flex items-center gap-2">
-                            <span className="w-2 h-2 rounded-full shadow-[0_0_6px_currentColor]" style={{ backgroundColor: stat.color, color: stat.color }} />
-                            <span className="text-zinc-300 truncate max-w-[80px]">{stat.label}</span>
-                        </div>
-                        <span className="font-semibold text-white">₹{Math.round(stat.value)}</span>
-                    </motion.div>
-                ))}
-            </div>
-        </div>
-    )
-  }
-
+  return (
+      <div className="flex flex-col md:flex-row gap-8 items-center justify-center py-2">
+          <div className="relative w-40 h-40 shrink-0 filter drop-shadow-[0_0_10px_rgba(45,212,191,0.2)]">
+              <svg viewBox="-1 -1 2 2" style={{ transform: 'rotate(-90deg)' }} className="w-full h-full">
+                  {paths}
+              </svg>
+              <div className="absolute inset-0 m-auto w-24 h-24 bg-[#020617] rounded-full flex flex-col items-center justify-center border border-white/10 shadow-inner z-10">
+                  <span className="text-[10px] text-zinc-500 font-medium uppercase tracking-wider">Total</span>
+                  <span className="text-sm font-bold text-white">
+                      <AnimatedNumber value={totalCost} />
+                  </span>
+              </div>
+          </div>
+          
+          <div className="flex-1 w-full grid grid-cols-1 xs:grid-cols-2 gap-3 text-xs">
+              {categoryStats.map((stat, i) => (
+                  <motion.div 
+                      key={i} 
+                      initial={{ opacity: 0, x: -10 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      transition={{ delay: 0.3 + (i * 0.05) }}
+                      className="flex items-center justify-between p-2.5 rounded-lg bg-white/5 border border-white/5 hover:bg-white/10 transition-colors min-w-0"
+                  >
+                      <div className="flex items-center gap-2 min-w-0 mr-2">
+                          <span 
+                              className="w-2 h-2 rounded-full shrink-0 shadow-[0_0_6px_currentColor]" 
+                              style={{ backgroundColor: stat.color, color: stat.color }} 
+                          />
+                          <span className="text-zinc-300 truncate font-medium">{stat.label}</span>
+                      </div>
+                      <span className="font-semibold text-white whitespace-nowrap shrink-0">
+                          ₹{Math.round(stat.value).toLocaleString()}
+                      </span>
+                  </motion.div>
+              ))}
+          </div>
+      </div>
+  )
+}
   // --- EMPTY STATE ---
   if (!activeGroup) {
     return (

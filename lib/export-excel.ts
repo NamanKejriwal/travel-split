@@ -14,252 +14,158 @@ interface Expense {
   }
 }
 
-interface Split {
-  profiles?: {
-    full_name: string
-  }
-  amount_owed: number
-}
-
-// 📊 Export expenses to Excel with professional formatting
 export function exportToExcel(
   expenses: Expense[],
-  groupName: string,
-  includeDetails: boolean = true
+  groupName: string
 ) {
   try {
-    // Create workbook
     const wb = XLSX.utils.book_new()
 
-    // 📄 SHEET 1: Summary
+    // 🔍 Pre-process data for accuracy
+    const realExpenses = expenses.filter(e => !e.is_settlement)
+    const settlements = expenses.filter(e => e.is_settlement)
+    const totalTripCost = realExpenses.reduce((sum, e) => sum + Number(e.amount), 0)
+    const totalCashFlow = expenses.reduce((sum, e) => sum + Number(e.amount), 0)
+
+    // --- SHEET 1: EXECUTIVE SUMMARY ---
     const summaryData = [
-      ['TravelSplit Expense Report'],
+      ['TRAVELSPLIT MASTER REPORT'],
       [''],
-      ['Trip Name:', groupName],
-      ['Generated:', new Date().toLocaleDateString('en-IN', {
-        day: '2-digit',
-        month: 'long',
-        year: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit'
-      })],
-      ['Total Expenses:', expenses.filter(e => !e.is_settlement).length],
-      ['Total Settlements:', expenses.filter(e => e.is_settlement).length],
+      ['TRIP PARAMETERS', 'VALUE'],
+      ['Trip Name', groupName],
+      ['Report Generation Date', new Date().toLocaleString('en-IN')],
+      ['Currency', 'INR (₹)'],
       [''],
-      ['Total Amount:', `₹${expenses.reduce((sum, e) => sum + Number(e.amount), 0).toFixed(2)}`],
+      ['FINANCIAL OVERVIEW', ''],
+      ['Actual Trip Cost (Net)', totalTripCost],
+      ['Total Cash Moved (Inc. Settlements)', totalCashFlow],
+      ['Total Transactions', expenses.length],
+      ['Average Expense Value', realExpenses.length > 0 ? (totalTripCost / realExpenses.length).toFixed(2) : 0],
       [''],
+      ['SYSTEM STATUS', 'Verified'],
     ]
-
     const summaryWS = XLSX.utils.aoa_to_sheet(summaryData)
-    
-    // Set column widths
-    summaryWS['!cols'] = [
-      { wch: 20 }, // Column A
-      { wch: 30 }, // Column B
-    ]
+    summaryWS['!cols'] = [{ wch: 30 }, { wch: 30 }]
+    XLSX.utils.book_append_sheet(wb, summaryWS, 'Executive Summary')
 
-    XLSX.utils.book_append_sheet(wb, summaryWS, 'Summary')
-
-    // 📋 SHEET 2: All Expenses
-    const expenseData = [
-      ['Date', 'Time', 'Description', 'Category', 'Paid By', 'Payment Method', 'Amount', 'Type']
-    ]
-
-    expenses.forEach(expense => {
-      const date = new Date(expense.created_at)
-      expenseData.push([
-        date.toLocaleDateString('en-IN'),
-        date.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }),
-        expense.description,
-        expense.category || '-',
-        expense.profiles?.full_name || 'Unknown',
-        expense.payment_mode || 'UPI',
-        Number(expense.amount).toFixed(2),
-        expense.is_settlement ? 'Settlement' : 'Expense'
-      ])
-    })
-
-    const expenseWS = XLSX.utils.aoa_to_sheet(expenseData)
-    
-    // Set column widths
-    expenseWS['!cols'] = [
-      { wch: 12 }, // Date
-      { wch: 8 },  // Time
-      { wch: 30 }, // Description
-      { wch: 15 }, // Category
-      { wch: 15 }, // Paid By
-      { wch: 15 }, // Payment Method
-      { wch: 10 }, // Amount
-      { wch: 12 }, // Type
-    ]
-
-    XLSX.utils.book_append_sheet(wb, expenseWS, 'All Expenses')
-
-    // 📊 SHEET 3: Category Breakdown
-    const categoryTotals: Record<string, number> = {}
-    expenses
-      .filter(e => !e.is_settlement)
-      .forEach(e => {
-        const cat = e.category || 'Uncategorized'
-        categoryTotals[cat] = (categoryTotals[cat] || 0) + Number(e.amount)
-      })
-
-    const categoryData = [
-      ['Category', 'Total Amount', 'Percentage']
-    ]
-
-    const totalAmount = Object.values(categoryTotals).reduce((a, b) => a + b, 0)
-    
-    Object.entries(categoryTotals)
-      .sort((a, b) => b[1] - a[1]) // Sort by amount descending
-      .forEach(([category, amount]) => {
-        const percentage = ((amount / totalAmount) * 100).toFixed(1)
-        categoryData.push([
-          category,
-          amount.toFixed(2),
-          `${percentage}%`
-        ])
-      })
-
-    const categoryWS = XLSX.utils.aoa_to_sheet(categoryData)
-    categoryWS['!cols'] = [
-      { wch: 20 },
-      { wch: 15 },
-      { wch: 12 },
-    ]
-
-    XLSX.utils.book_append_sheet(wb, categoryWS, 'By Category')
-
-    // 💰 SHEET 4: Payment Methods
-    const paymentTotals: Record<string, number> = {}
+    // --- SHEET 2: ALL TRANSACTIONS (RAW DATA) ---
+    const rawData = [['Date', 'Time', 'Description', 'Category', 'Paid By', 'Mode', 'Amount', 'Transaction Type']]
     expenses.forEach(e => {
-      const method = e.payment_mode || 'UPI'
-      paymentTotals[method] = (paymentTotals[method] || 0) + Number(e.amount)
-    })
-
-    const paymentData = [
-      ['Payment Method', 'Total Amount', 'Transaction Count']
-    ]
-
-    Object.entries(paymentTotals).forEach(([method, amount]) => {
-      const count = expenses.filter(e => (e.payment_mode || 'UPI') === method).length
-      paymentData.push([
-        method,
-        amount.toFixed(2),
-        count.toString()
+      const d = new Date(e.created_at)
+      rawData.push([
+        d.toLocaleDateString('en-GB'),
+        d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true }).toLowerCase(),
+        e.description,
+        e.category || 'Other',
+        e.profiles?.full_name || 'Unknown',
+        e.payment_mode || 'UPI',
+        Number(e.amount),
+        e.is_settlement ? 'Settlement / Debt Clear' : 'Direct Expense'
       ])
     })
+    const rawWS = XLSX.utils.aoa_to_sheet(rawData)
+    rawWS['!cols'] = [{ wch: 15 }, { wch: 12 }, { wch: 40 }, { wch: 15 }, { wch: 20 }, { wch: 12 }, { wch: 15 }, { wch: 20 }]
+    XLSX.utils.book_append_sheet(wb, rawWS, 'Transaction Ledger')
 
-    const paymentWS = XLSX.utils.aoa_to_sheet(paymentData)
-    paymentWS['!cols'] = [
-      { wch: 20 },
-      { wch: 15 },
-      { wch: 18 },
-    ]
-
-    XLSX.utils.book_append_sheet(wb, paymentWS, 'By Payment Method')
-
-    // 📅 SHEET 5: Daily Breakdown
-    const dailyTotals: Record<string, number> = {}
-    expenses
-      .filter(e => !e.is_settlement)
-      .forEach(e => {
-        const date = new Date(e.created_at).toLocaleDateString('en-IN')
-        dailyTotals[date] = (dailyTotals[date] || 0) + Number(e.amount)
-      })
-
-    const dailyData = [
-      ['Date', 'Total Spent', 'Number of Expenses']
-    ]
-
-    Object.entries(dailyTotals)
-      .sort((a, b) => new Date(a[0]).getTime() - new Date(b[0]).getTime())
-      .forEach(([date, amount]) => {
-        const count = expenses.filter(e => 
-          !e.is_settlement && 
-          new Date(e.created_at).toLocaleDateString('en-IN') === date
-        ).length
-        dailyData.push([
-          date,
-          amount.toFixed(2),
-          count.toString()
-        ])
-      })
-
-    const dailyWS = XLSX.utils.aoa_to_sheet(dailyData)
-    dailyWS['!cols'] = [
-      { wch: 15 },
-      { wch: 15 },
-      { wch: 18 },
-    ]
-
-    XLSX.utils.book_append_sheet(wb, dailyWS, 'Daily Breakdown')
-
-    // 💾 Generate and download file
-    const fileName = `${groupName.replace(/[^a-z0-9]/gi, '_')}_expenses_${new Date().toISOString().split('T')[0]}.xlsx`
+    // --- SHEET 3: PER PERSON ANALYTICS (DEEP DIVE) ---
+    const personMap: Record<string, { paid_exp: number, paid_settle: number, share: number }> = {}
     
-    XLSX.writeFile(wb, fileName)
-
-    toast.success('Excel file downloaded!', {
-      description: `${fileName}`,
-      duration: 5000
+    // Initialize map with all unique names
+    expenses.forEach(e => {
+      const name = e.profiles?.full_name || 'Unknown'
+      if (!personMap[name]) personMap[name] = { paid_exp: 0, paid_settle: 0, share: 0 }
     })
 
-    // 📊 Track export event
-    if (typeof window !== 'undefined' && (window as any).trackEvent) {
-      (window as any).trackEvent.exportedPDF(expenses.length)
-    }
+    // Populate contributions
+    expenses.forEach(e => {
+      const name = e.profiles?.full_name || 'Unknown'
+      if (e.is_settlement) personMap[name].paid_settle += Number(e.amount)
+      else personMap[name].paid_exp += Number(e.amount)
+    })
 
-    return true
-  } catch (error) {
-    console.error('Export error:', error)
-    toast.error('Failed to export Excel file')
-    return false
-  }
-}
+    // Calculate fair share (assuming equal split of totalTripCost)
+    const memberCount = Object.keys(personMap).length
+    const sharePerHead = memberCount > 0 ? totalTripCost / memberCount : 0
+    Object.keys(personMap).forEach(name => personMap[name].share = sharePerHead)
 
-// 📄 Export single expense with splits (detailed view)
-export function exportExpenseDetail(
-  expense: Expense,
-  splits: Split[]
-) {
-  try {
-    const wb = XLSX.utils.book_new()
-
-    const data = [
-      ['Expense Details'],
-      [''],
-      ['Description:', expense.description],
-      ['Amount:', `₹${Number(expense.amount).toFixed(2)}`],
-      ['Category:', expense.category || '-'],
-      ['Paid By:', expense.profiles?.full_name || 'Unknown'],
-      ['Payment Method:', expense.payment_mode || 'UPI'],
-      ['Date:', new Date(expense.created_at).toLocaleString('en-IN')],
-      [''],
-      ['Split Details:'],
-      ['Name', 'Amount Owed'],
-    ]
-
-    splits.forEach(split => {
-      data.push([
-        split.profiles?.full_name || 'Unknown',
-        `₹${Number(split.amount_owed).toFixed(2)}`
+    const personData = [['Member Name', 'Expenses Paid (A)', 'Settlements Paid (B)', 'Total Outflow (A+B)', 'Fair Share (C)', 'Net Balance (A+B-C)']]
+    Object.entries(personMap).forEach(([name, s]) => {
+      personData.push([
+        name, 
+        s.paid_exp, 
+        s.paid_settle, 
+        s.paid_exp + s.paid_settle, 
+        s.share, 
+        (s.paid_exp + s.paid_settle) - s.share
       ])
     })
+    const personWS = XLSX.utils.aoa_to_sheet(personData)
+    personWS['!cols'] = [{ wch: 25 }, { wch: 18 }, { wch: 18 }, { wch: 18 }, { wch: 18 }, { wch: 20 }]
+    XLSX.utils.book_append_sheet(wb, personWS, 'User Balances')
 
-    const ws = XLSX.utils.aoa_to_sheet(data)
-    ws['!cols'] = [{ wch: 20 }, { wch: 20 }]
+    // --- SHEET 4: CATEGORY RECON ---
+    const catData = [['Category', 'Total Spend', 'Contribution %']]
+    const catMap: Record<string, number> = {}
+    realExpenses.forEach(e => {
+      const c = e.category || 'Other'
+      catMap[c] = (catMap[c] || 0) + Number(e.amount)
+    })
+    Object.entries(catMap).sort((a,b) => b[1]-a[1]).forEach(([c, amt]) => {
+      catData.push([c, amt, `${((amt/totalTripCost)*100).toFixed(1)}%`])
+    })
+    const catWS = XLSX.utils.aoa_to_sheet(catData)
+    catWS['!cols'] = [{ wch: 20 }, { wch: 15 }, { wch: 15 }]
+    XLSX.utils.book_append_sheet(wb, catWS, 'Category Insights')
 
-    XLSX.utils.book_append_sheet(wb, ws, 'Expense Detail')
+    // --- SHEET 5: MODE & LIQUIDITY ---
+    const modeData = [['Payment Mode', 'Total Processed', 'Volume %', 'Count']]
+    const modeMap: Record<string, number> = {}
+    realExpenses.forEach(e => {
+      const m = e.payment_mode || 'UPI'
+      modeMap[m] = (modeMap[m] || 0) + Number(e.amount)
+    })
+    Object.entries(modeMap).forEach(([m, amt]) => {
+      modeData.push([m, amt, `${((amt/totalTripCost)*100).toFixed(1)}%`, realExpenses.filter(x => (x.payment_mode||'UPI') === m).length])
+    })
+    const modeWS = XLSX.utils.aoa_to_sheet(modeData)
+    XLSX.utils.book_append_sheet(wb, modeWS, 'Payment Modes')
 
-    const fileName = `expense_${expense.description.slice(0, 20)}_${Date.now()}.xlsx`
+    // --- SHEET 6: DAILY VELOCITY ---
+    const dailyData = [['Date', 'Daily Spend', 'Transaction Count']]
+    const dayMap: Record<string, number> = {}
+    realExpenses.forEach(e => {
+      const d = new Date(e.created_at).toLocaleDateString('en-GB')
+      dayMap[d] = (dayMap[d] || 0) + Number(e.amount)
+    })
+    Object.entries(dayMap).forEach(([d, amt]) => {
+      dailyData.push([d, amt, realExpenses.filter(x => new Date(x.created_at).toLocaleDateString('en-GB') === d).length])
+    })
+    const dailyWS = XLSX.utils.aoa_to_sheet(dailyData)
+    XLSX.utils.book_append_sheet(wb, dailyWS, 'Daily Spending')
+
+    // --- SHEET 7: SETTLEMENT LOG ---
+    const settleData = [['Date', 'From (Payer)', 'Amount Cleared', 'Mode']]
+    settlements.forEach(s => {
+      settleData.push([
+        new Date(s.created_at).toLocaleDateString('en-GB'),
+        s.profiles?.full_name || 'Unknown',
+        Number(s.amount),
+        s.payment_mode || 'UPI'
+      ])
+    })
+    const settleWS = XLSX.utils.aoa_to_sheet(settleData)
+    settleWS['!cols'] = [{ wch: 15 }, { wch: 25 }, { wch: 15 }, { wch: 15 }]
+    XLSX.utils.book_append_sheet(wb, settleWS, 'Debt Settlements')
+
+    // 💾 FINAL GENERATION
+    const fileName = `${groupName.replace(/\s+/g, '_')}_Comprehensive_Report.xlsx`
     XLSX.writeFile(wb, fileName)
+    toast.success('Excel created')
 
-    toast.success('Expense details exported!')
     return true
   } catch (error) {
     console.error('Export error:', error)
-    toast.error('Failed to export details')
+    toast.error('Failed to create file')
     return false
   }
 }

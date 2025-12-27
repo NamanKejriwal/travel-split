@@ -300,68 +300,171 @@ export function ActivityView({ activeGroup, onEditExpense }: ActivityViewProps) 
 
   // 10. PDF Generation Logic (Preserved)
   const handleDownloadPDF = () => {
+    // 🔍 1. PRE-PROCESS DATA
+    const realExpenses = activities.filter(e => !e.is_settlement);
+    const settlements = activities.filter(e => e.is_settlement);
+    const totalTripCost = realExpenses.reduce((sum, e) => sum + Number(e.amount), 0);
+    
+    // Member Analytics Logic
+    const personMap: Record<string, { paid_exp: number, paid_settle: number }> = {};
+    activities.forEach(e => {
+        const name = e.profiles?.full_name || 'Unknown';
+        if (!personMap[name]) personMap[name] = { paid_exp: 0, paid_settle: 0 };
+        if (e.is_settlement) personMap[name].paid_settle += Number(e.amount);
+        else personMap[name].paid_exp += Number(e.amount);
+    });
+    const memberCount = Object.keys(personMap).length;
+    const sharePerHead = memberCount > 0 ? totalTripCost / memberCount : 0;
+
+    // Category Logic
+    const catMap: Record<string, number> = {};
+    realExpenses.forEach(e => {
+        const c = e.category || 'Other';
+        catMap[c] = (catMap[c] || 0) + Number(e.amount);
+    });
+
+    // Payment Mode Logic
+    const modeMap: Record<string, { amount: number, count: number }> = {};
+    realExpenses.forEach(e => {
+        const m = e.payment_mode || 'UPI';
+        if (!modeMap[m]) modeMap[m] = { amount: 0, count: 0 };
+        modeMap[m].amount += Number(e.amount);
+        modeMap[m].count += 1;
+    });
+
+    // Daily Velocity Logic
+    const dayMap: Record<string, { amount: number, count: number }> = {};
+    realExpenses.forEach(e => {
+        const d = new Date(e.created_at).toLocaleDateString('en-GB');
+        if (!dayMap[d]) dayMap[d] = { amount: 0, count: 0 };
+        dayMap[d].amount += Number(e.amount);
+        dayMap[d].count += 1;
+    });
+
     const printContent = `
       <html>
         <head>
-          <title>${activeGroup?.name || "Trip"} - Detailed Report</title>
+          <title>${activeGroup?.name || "Trip"} - Full Expedition Report</title>
           <style>
-            body { font-family: sans-serif; padding: 20px; font-size: 12px; }
-            h1 { color: #00A896; border-bottom: 2px solid #eee; padding-bottom: 10px; }
-            table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-            th, td { text-align: left; padding: 10px; border-bottom: 1px solid #ddd; }
-            th { background-color: #f3f4f6; color: #444; font-weight: bold; }
-            .settlement { color: #2563eb; font-style: italic; }
+            body { font-family: 'Helvetica', 'Arial', sans-serif; padding: 30px; color: #1f2937; line-height: 1.5; font-size: 11px; }
+            .header { text-align: center; margin-bottom: 30px; border-bottom: 2px solid #00A896; padding-bottom: 15px; }
+            h1 { color: #00A896; margin: 0; font-size: 24px; text-transform: uppercase; }
+            h2 { color: #111827; border-left: 4px solid #00A896; padding-left: 10px; margin-top: 30px; font-size: 14px; text-transform: uppercase; }
+            table { width: 100%; border-collapse: collapse; margin-top: 10px; table-layout: fixed; }
+            th, td { text-align: left; padding: 8px; border: 1px solid #e5e7eb; word-wrap: break-word; }
+            th { background-color: #f9fafb; color: #4b5563; font-weight: bold; }
             .amount { text-align: right; font-weight: bold; }
-            .meta { color: #666; font-size: 10px; margin-top: 5px; }
+            .summary-card { background: #f0fdfa; border: 1px solid #ccfbf1; padding: 15px; border-radius: 8px; display: flex; justify-content: space-between; }
+            .settlement-text { color: #2563eb; font-style: italic; }
+            .page-break { page-break-before: always; }
           </style>
         </head>
         <body>
-          <h1>${activeGroup?.name || "Trip"} Expense Report</h1>
-          <p>Generated on: ${new Date().toLocaleDateString()}</p>
+          <div class="header">
+            <h1>${activeGroup?.name || "Trip"} EXPEDITION REPORT</h1>
+            <p>Generated on ${new Date().toLocaleString('en-IN')}</p>
+          </div>
+
+          <h2>1. Executive Summary</h2>
+          <div class="summary-card">
+            <div><strong>Trip Cost:</strong> ₹${totalTripCost.toLocaleString()}</div>
+            <div><strong>Transactions:</strong> ${activities.length}</div>
+            <div><strong>Avg/Head:</strong> ₹${sharePerHead.toFixed(0)}</div>
+          </div>
+
+          <h2>2. Member Financial Status</h2>
           <table>
-            <thead>
-              <tr>
-                <th>Date</th>
-                <th>Description</th>
-                <th>Category</th>
-                <th>Paid By</th>
-                <th>Mode</th>
-                <th>Amount</th>
-              </tr>
-            </thead>
+            <thead><tr><th>Name</th><th>Paid (Exp)</th><th>Paid (Settle)</th><th>Fair Share</th><th>Balance</th></tr></thead>
             <tbody>
-              ${activities.map(item => `
+              ${Object.entries(personMap).map(([name, s]) => `
                 <tr>
-                  <td>
-                    ${new Date(item.created_at).toLocaleDateString()}
-                    <div class="meta">${new Date(item.created_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</div>
+                  <td>${name}</td>
+                  <td class="amount">₹${s.paid_exp.toFixed(0)}</td>
+                  <td class="amount">₹${s.paid_settle.toFixed(0)}</td>
+                  <td class="amount">₹${sharePerHead.toFixed(0)}</td>
+                  <td class="amount" style="color: ${(s.paid_exp + s.paid_settle - sharePerHead) >= 0 ? '#10b981' : '#ef4444'}">
+                    ₹${(s.paid_exp + s.paid_settle - sharePerHead).toFixed(0)}
                   </td>
-                  <td class="${item.is_settlement ? 'settlement' : ''}">
-                    ${item.is_settlement ? 'Settlement / Payment' : item.description}
-                  </td>
-                  <td>${item.category || '-'}</td>
-                  <td>${item.profiles?.full_name || 'Unknown'}</td>
-                  <td>${item.payment_mode || 'UPI'}</td>
-                  <td class="amount">₹${Number(item.amount).toFixed(2)}</td>
                 </tr>
               `).join('')}
             </tbody>
           </table>
+
+          <h2>3. Detailed Transaction Ledger</h2>
+          <table>
+            <thead><tr><th style="width: 80px;">Date</th><th>Description</th><th>Paid By</th><th style="width: 80px;">Amount</th></tr></thead>
+            <tbody>
+              ${activities.map(item => `
+                <tr>
+                  <td>${new Date(item.created_at).toLocaleDateString('en-GB')}</td>
+                  <td class="${item.is_settlement ? 'settlement-text' : ''}">${item.is_settlement ? 'Debt Settlement' : item.description}</td>
+                  <td>${item.profiles?.full_name || 'Unknown'}</td>
+                  <td class="amount">₹${Number(item.amount).toFixed(0)}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+
+          <div class="page-break"></div>
+
+          <h2>4. Spending by Category</h2>
+          <table>
+            <thead><tr><th>Category</th><th>Total Amount</th><th>Percentage</th></tr></thead>
+            <tbody>
+              ${Object.entries(catMap).sort((a,b) => b[1]-a[1]).map(([cat, amt]) => `
+                <tr><td>${cat}</td><td class="amount">₹${amt.toFixed(0)}</td><td>${((amt/totalTripCost)*100).toFixed(1)}%</td></tr>
+              `).join('')}
+            </tbody>
+          </table>
+
+          <h2>5. Payment Liquidity (Mode)</h2>
+          <table>
+            <thead><tr><th>Mode</th><th>Volume</th><th>Count</th><th>Trip %</th></tr></thead>
+            <tbody>
+              ${Object.entries(modeMap).map(([mode, data]) => `
+                <tr><td>${mode}</td><td class="amount">₹${data.amount.toFixed(0)}</td><td>${data.count}</td><td>${((data.amount/totalTripCost)*100).toFixed(1)}%</td></tr>
+              `).join('')}
+            </tbody>
+          </table>
+
+          <h2>6. Daily Spending Timeline</h2>
+          <table>
+            <thead><tr><th>Date</th><th>Daily Total</th><th>Transactions</th></tr></thead>
+            <tbody>
+              ${Object.entries(dayMap).sort().map(([date, data]) => `
+                <tr><td>${date}</td><td class="amount">₹${data.amount.toFixed(0)}</td><td>${data.count}</td></tr>
+              `).join('')}
+            </tbody>
+          </table>
+
+          <h2>7. Debt Settlement History</h2>
+          <table>
+            <thead><tr><th>Date</th><th>Payer</th><th>Receiver / Description</th><th>Amount</th></tr></thead>
+            <tbody>
+              ${settlements.length > 0 ? settlements.map(s => `
+                <tr>
+                  <td>${new Date(s.created_at).toLocaleDateString('en-GB')}</td>
+                  <td>${s.profiles?.full_name || 'Unknown'}</td>
+                  <td class="settlement-text">Settlement Payment</td>
+                  <td class="amount">₹${Number(s.amount).toFixed(0)}</td>
+                </tr>
+              `).join('') : '<tr><td colspan="4" style="text-align:center">No settlements recorded.</td></tr>'}
+            </tbody>
+          </table>
         </body>
       </html>
-    `
-    const printWindow = window.open('', '', 'width=900,height=800')
-    if (printWindow) {
-        printWindow.document.write(printContent)
-        printWindow.document.close()
-        printWindow.focus()
-        setTimeout(() => {
-            printWindow.print()
-            printWindow.close()
-        }, 500)
-    }
-  }
+    `;
 
+    const printWindow = window.open('', '', 'width=1000,height=900');
+    if (printWindow) {
+        printWindow.document.write(printContent);
+        printWindow.document.close();
+        setTimeout(() => {
+            printWindow.print();
+            printWindow.close();
+        }, 1000);
+    }
+}
   // --- RENDER ---
   if (!activeGroup) {
     return (

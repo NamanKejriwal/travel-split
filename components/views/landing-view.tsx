@@ -1,11 +1,11 @@
 "use client"
 
-import React, { useState, useEffect, useRef } from "react"
+import React from "react"
 import { Button } from "@/components/ui/button"
-import { ArrowRight, Sparkles, FileText, CreditCard, Instagram, Twitter, Linkedin, Globe, ShieldCheck, Zap } from "lucide-react"
+import { ArrowRight, Sparkles, FileText, CreditCard, Instagram, Mail, Zap, Brain } from "lucide-react"
 import { motion, useScroll, useTransform, useSpring, useMotionTemplate, useMotionValue } from "framer-motion"
 
-// --- ANIMATION VARIANTS ---
+// --- ANIMATION VARIANTS (With Build Fixes) ---
 const fadeInUp = {
   hidden: { opacity: 0, y: 40, filter: "blur(10px)" },
   visible: { 
@@ -20,7 +20,6 @@ const staggerContainer = {
   visible: { transition: { staggerChildren: 0.15 } }
 }
 
-// --- SPOTLIGHT CARD COMPONENT ---
 function SpotlightCard({ children, className = "" }: { children: React.ReactNode; className?: string }) {
   const mouseX = useMotionValue(0)
   const mouseY = useMotionValue(0)
@@ -79,10 +78,7 @@ export function LandingView({ onGetStarted }: LandingViewProps) {
           className="h-full w-full object-cover opacity-80"
         >
           <source src="/background.mp4" type="video/mp4" />
-          <source 
-            src="https://videos.pexels.com/video-files/3252226/3252226-hd_1920_1080_25fps.mp4" 
-            type="video/mp4" 
-          />
+          <source src="https://videos.pexels.com/video-files/3252226/3252226-hd_1920_1080_25fps.mp4" type="video/mp4" />
         </motion.video>
       </div>
 
@@ -90,23 +86,21 @@ export function LandingView({ onGetStarted }: LandingViewProps) {
       <motion.nav 
         initial={{ y: -100, opacity: 0 }}
         animate={{ y: 0, opacity: 1 }}
-        transition={{ duration: 1, delay: 0.5, ease: [0.22, 1, 0.36, 1] }}
+        transition={{ duration: 1, delay: 0.5, ease: [0.22, 1, 0.36, 1] as const }}
         className="fixed left-0 right-0 top-0 z-50 py-6"
       >
         <div className="container mx-auto flex items-center justify-between px-6">
           <div className="flex items-center gap-3 cursor-pointer group">
             <div className="relative flex h-10 w-10 items-center justify-center rounded-xl bg-white/5 backdrop-blur-md border border-white/10 shadow-lg transition-transform duration-500 group-hover:rotate-12">
-               <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className="drop-shadow-glow">
+               <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                 <path d="M12 2C7.58172 2 4 5.58172 4 10C4 14.4183 12 22 12 22" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
                 <path d="M12 6V14" stroke="white" strokeWidth="2.5" strokeLinecap="round"/>
-                <circle cx="12" cy="10" r="3.5" stroke="white" strokeWidth="0" fill="white"/>
+                <circle cx="12" cy="10" r="3.5" fill="white"/>
                 <path d="M9 10H15" stroke="#14b8a6" strokeWidth="2"/>
               </svg>
             </div>
-            <span className="text-xl font-bold tracking-tight text-white drop-shadow-md">TravelSplit</span>
+            <span className="text-xl font-bold tracking-tight text-white">TravelSplit</span>
           </div>
-          
-          {/* Removed Login Button */}
         </div>
       </motion.nav>
 
@@ -118,30 +112,24 @@ export function LandingView({ onGetStarted }: LandingViewProps) {
         animate="visible"
         variants={staggerContainer}
       >
-        
-        {/* Removed V2.0 Badge - Headline is now top element */}
-
-        {/* Headline */}
         <motion.h1 variants={fadeInUp} className="mx-auto max-w-5xl text-6xl font-extrabold tracking-tight text-white sm:text-7xl lg:text-9xl drop-shadow-2xl">
           Travel <span className="text-transparent bg-clip-text bg-gradient-to-r from-teal-200 via-teal-400 to-teal-200 animate-gradient-x">Together.</span> <br />
           Split <span className="font-serif italic text-white/80">Smarter.</span>
         </motion.h1>
 
-        {/* Subtitle */}
         <motion.p variants={fadeInUp} className="mx-auto mt-8 max-w-2xl text-lg text-gray-300 sm:text-xl font-medium leading-relaxed drop-shadow-md">
           The fintech operating system for modern explorers. 
-          Real-time expense tracking, instant multi-currency settlement, and AI budgeting.
+          Real-time expense tracking, automatic debt calculation, and AI-powered budget insights.
         </motion.p>
 
-        {/* Main CTA */}
         <motion.div variants={fadeInUp} className="mt-12 flex justify-center">
           <Button 
             size="lg" 
             onClick={onGetStarted}
-            className="group relative h-16 overflow-hidden rounded-full bg-white px-12 text-lg font-bold text-slate-900 shadow-[0_0_50px_-12px_rgba(255,255,255,0.5)] transition-all duration-300 hover:scale-[1.03] hover:shadow-[0_0_80px_-15px_rgba(255,255,255,0.7)]"
+            className="group relative h-16 overflow-hidden rounded-full bg-white px-12 text-lg font-bold text-slate-900 shadow-[0_0_50px_-12px_rgba(255,255,255,0.5)] transition-all duration-300 hover:scale-[1.03]"
           >
             <span className="relative z-10 flex items-center">
-              Start Splitting Free
+              Start Splitting
               <ArrowRight className="ml-2 h-5 w-5 transition-transform duration-300 group-hover:translate-x-1" />
             </span>
           </Button>
@@ -154,103 +142,119 @@ export function LandingView({ onGetStarted }: LandingViewProps) {
           
           <div className="mb-20 text-center">
             <h2 className="text-3xl font-bold text-white md:text-5xl">Everything you need.</h2>
-            <p className="mt-4 text-gray-400">Designed for power users, built for vacationers.</p>
+            <p className="mt-4 text-gray-400">Precision tracking meets effortless group management.</p>
           </div>
 
           <div className="grid grid-cols-1 gap-6 md:grid-cols-3 md:grid-rows-2 h-auto md:h-[600px]">
             
-            {/* Large Card (Left) */}
             <SpotlightCard className="md:col-span-2 md:row-span-2 p-10 flex flex-col justify-between bg-gradient-to-br from-white/5 to-transparent">
                <div>
                   <div className="h-14 w-14 rounded-2xl bg-teal-500/20 flex items-center justify-center text-teal-400 mb-6">
                     <Zap className="h-7 w-7" />
                   </div>
-                  <h3 className="text-3xl font-bold text-white">Instant Settlement</h3>
+                  <h3 className="text-3xl font-bold text-white">Smart Group Splitting</h3>
                   <p className="mt-4 text-lg text-gray-400 max-w-md">
-                    No more "I'll pay you later." Connect your cards via Plaid™ and settle debts instantly with a single tap. Supports 140+ currencies.
+                    Skip the spreadsheets. Log expenses in INR and let our engine handle the math. We track who owes what so you can focus on the journey.
                   </p>
                </div>
-               {/* Mock UI Element */}
-               <div className="mt-8 w-full rounded-xl border border-white/10 bg-black/40 p-4 backdrop-blur-sm">
-                  <div className="flex items-center justify-between border-b border-white/5 pb-4 mb-4">
-                    <div className="flex items-center gap-3">
-                      <div className="h-8 w-8 rounded-full bg-purple-500" />
-                      <div className="text-sm">
-                        <div className="text-white font-medium">Sarah sent you</div>
-                        <div className="text-gray-500 text-xs">Just now</div>
+               
+               <div className="mt-8 w-full rounded-2xl border border-white/5 bg-[#0a0a0a]/60 p-4 backdrop-blur-md shadow-2xl">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-4">
+                      <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-zinc-900/50 border border-white/5 shadow-inner">
+                        <CreditCard className="h-6 w-6 text-[#00A896]" />
+                      </div>
+                      <div className="flex flex-col gap-1">
+                        <div className="text-sm font-bold text-white tracking-tight">Manali Trip Dinner</div>
+                        <div className="flex items-center gap-2">
+                          <div className="flex -space-x-2">
+                            {[1, 2, 3].map((i) => (
+                              <div key={i} className="h-5 w-5 rounded-full border-2 border-[#0a0a0a] bg-zinc-800 ring-1 ring-white/5" />
+                            ))}
+                          </div>
+                          <span className="text-[10px] font-medium text-zinc-500 uppercase tracking-widest">Shared by 4</span>
+                        </div>
                       </div>
                     </div>
-                    <span className="text-teal-400 font-bold">+$124.50</span>
+                    <div className="text-right flex flex-col items-end">
+                      <div className="text-base font-black text-white tracking-tighter">₹4,500</div>
+                      <div className="text-[10px] font-bold text-[#00A896] bg-[#00A896]/10 px-2 py-0.5 rounded-full mt-1">YOU PAID</div>
+                    </div>
                   </div>
-                  <div className="flex items-center gap-2 text-xs text-gray-500">
-                    <ShieldCheck className="h-3 w-3" /> Encrypted Transaction
+                </div>
+            </SpotlightCard>
+
+            <SpotlightCard className="p-8 flex flex-col justify-between bg-black/20 overflow-hidden">
+               <div>
+                <Sparkles className="h-8 w-8 text-teal-400 mb-4" />
+                <h3 className="text-xl font-bold text-white">AI Insights</h3>
+                <p className="mt-2 text-sm text-gray-400">Intelligent budget tracking and category analysis.</p>
+               </div>
+               <div className="mt-4 rounded-xl bg-[#00A896]/10 border border-[#00A896]/20 p-3">
+                  <div className="flex items-center gap-2 mb-2">
+                    <Brain className="h-3 w-3 text-teal-400" />
+                    <span className="text-[10px] font-bold text-teal-400 uppercase tracking-tighter">AI Assistant</span>
                   </div>
+                  <p className="text-[11px] text-zinc-300 leading-tight italic">"You've allocated 40% of your budget to transport. Consider shared cabs."</p>
                </div>
             </SpotlightCard>
 
-            {/* Small Card (Top Right) */}
-            <SpotlightCard className="p-8 flex flex-col justify-center bg-black/20">
-               <Sparkles className="h-8 w-8 text-teal-400 mb-4" />
-               <h3 className="text-xl font-bold text-white">AI Accountant</h3>
-               <p className="mt-2 text-sm text-gray-400">
-                 "Hey AI, how much did we spend on sushi in Tokyo?" Get instant answers.
-               </p>
-            </SpotlightCard>
-
-            {/* Small Card (Bottom Right) */}
             <SpotlightCard className="p-8 flex flex-col justify-center bg-black/20">
                <FileText className="h-8 w-8 text-blue-400 mb-4" />
-               <h3 className="text-xl font-bold text-white">Export & Report</h3>
-               <p className="mt-2 text-sm text-gray-400">
-                 Generate beautiful PDF reports for business trips or personal records.
-               </p>
+               <h3 className="text-xl font-bold text-white">Full History</h3>
+               <p className="mt-2 text-sm text-gray-400">Complete activity logs and summaries for your records.</p>
             </SpotlightCard>
 
           </div>
         </div>
-
-        {/* --- FOOTER --- */}
         <footer className="border-t border-white/5 bg-black/40 py-20">
-          <div className="container mx-auto px-6">
-            <div className="grid grid-cols-2 gap-10 md:grid-cols-4 lg:gap-20">
-              <div className="col-span-2 lg:col-span-1">
-                <span className="text-2xl font-bold text-white">TravelSplit</span>
-                <p className="mt-4 text-sm text-gray-500">
-                  Designed in California. <br/> Built for the world.
-                </p>
-              </div>
-              <div>
-                <h4 className="font-semibold text-white">Product</h4>
-                <ul className="mt-4 space-y-2 text-sm text-gray-500">
-                  <li><a href="#" className="hover:text-white transition-colors">Download</a></li>
-                  <li><a href="#" className="hover:text-white transition-colors">Changelog</a></li>
-                  <li><a href="#" className="hover:text-white transition-colors">Pricing</a></li>
-                </ul>
-              </div>
-              <div>
-                <h4 className="font-semibold text-white">Legal</h4>
-                <ul className="mt-4 space-y-2 text-sm text-gray-500">
-                  <li><a href="#" className="hover:text-white transition-colors">Privacy</a></li>
-                  <li><a href="#" className="hover:text-white transition-colors">Terms</a></li>
-                </ul>
-              </div>
-              <div>
-                 <h4 className="font-semibold text-white">Social</h4>
-                 <div className="mt-4 flex gap-4">
-                    <Twitter className="h-5 w-5 text-gray-500 hover:text-white cursor-pointer transition-colors"/>
-                    <Instagram className="h-5 w-5 text-gray-500 hover:text-white cursor-pointer transition-colors"/>
-                 </div>
-              </div>
-            </div>
-            <div className="mt-20 flex flex-col items-center justify-between gap-4 border-t border-white/5 pt-8 text-xs text-gray-600 md:flex-row">
-              <p>&copy; 2025 TravelSplit Inc.</p>
-              <div className="flex items-center gap-2">
-                <div className="h-2 w-2 rounded-full bg-green-500 animate-pulse"/>
-                <span>All Systems Operational</span>
-              </div>
-            </div>
-          </div>
-        </footer>
+  <div className="container mx-auto px-6">
+    <div className="grid grid-cols-1 md:grid-cols-3 gap-10">
+      <div className="flex flex-col gap-4">
+        <span className="text-2xl font-bold text-white">TravelSplit</span>
+        <p className="text-sm text-zinc-500">Designed in India. Built for the world.</p>
+        {/* Fix: Added Mail icon here */}
+        <div className="flex items-center gap-2 text-xs text-zinc-500">
+          <Mail className="h-3.5 w-3.5" />
+          <a href="mailto:tripsplit8@gmail.com" className="hover:text-white transition-colors">
+            tripsplit8@gmail.com
+          </a>
+        </div>
+      </div>
+
+      <div>
+        <h4 className="font-semibold text-zinc-400 transition-colors duration-300 hover:text-white cursor-default">Legal</h4>
+        <ul className="mt-4 space-y-2 text-sm text-zinc-500">
+          <li><a href="/privacy" className="hover:text-white transition-colors">Privacy Policy</a></li>
+          <li><a href="/terms" className="hover:text-white transition-colors">Terms of Service</a></li>
+          <li className="text-[10px] pt-2 italic">Support: tripsplit8@gmail.com</li>
+        </ul>
+      </div>
+
+      <div>
+        <h4 className="font-semibold text-zinc-400 transition-colors duration-300 hover:text-white cursor-default">Connect with us</h4>
+        <div className="mt-4 flex gap-4">
+          {/* Gmail Icon */}
+          <a href="mailto:tripsplit8@gmail.com" className="group p-2 rounded-full bg-white/5 border border-white/5 hover:border-white/20 transition-all">
+            <Mail className="h-5 w-5 text-zinc-500 group-hover:text-white transition-colors"/>
+          </a>
+          {/* Instagram Icon */}
+          <a href="https://www.instagram.com/trip.split8/?hl=en" target="_blank" rel="noreferrer" className="group p-2 rounded-full bg-white/5 border border-white/5 hover:border-white/20 transition-all">
+            <Instagram className="h-5 w-5 text-zinc-500 group-hover:text-white transition-colors"/>
+          </a>
+        </div>
+      </div>
+    </div>
+
+    <div className="mt-20 flex flex-col items-center justify-between gap-4 border-t border-white/5 pt-8 text-[10px] uppercase tracking-widest text-zinc-600 md:flex-row">
+      <p>&copy; 2025 TravelSplit Inc.</p>
+      <div className="flex items-center gap-2">
+        <div className="h-1.5 w-1.5 rounded-full bg-[#00A896] animate-pulse shadow-[0_0_8px_#00A896]"/>
+        <span>All Systems Operational</span>
+      </div>
+    </div>
+  </div>
+</footer>
       </div>
     </div>
   )
