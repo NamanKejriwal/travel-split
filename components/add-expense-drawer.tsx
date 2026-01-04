@@ -368,8 +368,10 @@ export function AddExpenseDrawer({
           }))
 
         if (recipients.length > 0) {
-          // Fire and forget
-          fetch('/api/notify', {
+          console.log("Sending email notifications to:", recipients.length, "people");
+          
+          // Use await to ensure the request is actually sent before component unmounts
+          const res = await fetch('/api/notify', {
             method: 'POST',
             body: JSON.stringify({
               type: 'EXPENSE',
@@ -381,6 +383,15 @@ export function AddExpenseDrawer({
               recipients
             })
           })
+          
+          if (!res.ok) {
+             const errData = await res.json().catch(() => ({}))
+             console.error("Email notification failed:", errData)
+          } else {
+             console.log("Email notification sent successfully")
+          }
+        } else {
+          console.warn("No recipients found with email addresses for notification")
         }
       } catch (err) { console.error("Notify error", err) }
       // ================================

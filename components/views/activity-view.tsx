@@ -278,11 +278,11 @@ export function ActivityView({ activeGroup, onEditExpense }: ActivityViewProps) 
     setLoading(true)
 
     try {
-      // === 1. FORCE FETCH EMAILS BEFORE DELETING ===
-      // We fetch this explicitly to ensure we don't miss anyone
+      // === 1. FORCE FETCH EMAILS & USER_IDs BEFORE DELETING ===
+      // We fetch user_id too to correctly filter out the current user
       const { data: splits } = await supabase
         .from('expense_splits')
-        .select('profiles(full_name, email)') 
+        .select('user_id, profiles(full_name, email)') 
         .eq('expense_id', selectedActivity.id)
 
       // === 2. PREPARE NOTIFICATION DATA ===
@@ -296,21 +296,30 @@ export function ActivityView({ activeGroup, onEditExpense }: ActivityViewProps) 
          recipients: [] as any[]
       }
 
-      const rawRecipients = (splits || []).map((s: any) => s.profiles)
+      // Flatten structure and ensure profiles exist
+      const participants = (splits || [])
+        .filter((s: any) => s.profiles)
+        .map((s: any) => ({
+          userId: s.user_id,
+          ...s.profiles
+        }))
 
       if (selectedActivity.is_settlement) {
          // For settlements, notify the person who was getting paid
          // (The first person in the split list is the receiver)
-         const receiver = rawRecipients[0]
+         const receiver = participants[0]
          if (receiver?.email) {
             notificationData.recipients.push({ email: receiver.email, name: receiver.full_name })
          }
       } else {
          // For expenses, notify everyone involved (except the person deleting)
-         notificationData.recipients = rawRecipients
-            .filter((p: any) => p?.email && p?.email !== currentUserId)
+         // We use currentUserId from state (which is the logged in user's UUID)
+         notificationData.recipients = participants
+            .filter((p: any) => p.email && p.userId !== currentUserId)
             .map((p: any) => ({ email: p.email, name: p.full_name }))
       }
+
+      console.log("Preparing Delete Notification:", notificationData);
 
       // === 3. PERFORM DELETE ===
       await supabase.from('expense_splits').delete().eq('expense_id', selectedActivity.id)
@@ -318,18 +327,27 @@ export function ActivityView({ activeGroup, onEditExpense }: ActivityViewProps) 
       
       // === 4. SEND NOTIFICATION ===
       if (notificationData.recipients.length > 0) {
-         // Fire and forget
-         fetch('/api/notify', {
+         // Await the fetch to ensure it sends before the component state might change
+         const res = await fetch('/api/notify', {
             method: 'POST',
             body: JSON.stringify(notificationData)
          })
+         
+         if (!res.ok) {
+            const errData = await res.json().catch(() => ({}))
+            console.error("Notification Failed:", errData)
+         } else {
+            console.log("Notification Sent Successfully")
+         }
+      } else {
+         console.warn("No recipients for delete notification")
       }
 
       toast.success("Deleted successfully")
       await fetchActivity(0, true)
 
     } catch (err) {
-      console.error(err)
+      console.error("Delete logic error:", err)
       toast.error("Failed to delete")
       setLoading(false)
     }
@@ -356,8 +374,6 @@ export function ActivityView({ activeGroup, onEditExpense }: ActivityViewProps) 
     generatePDF(activities, activeGroup);
   }
 
-  // ... (REST OF THE RENDER LOGIC REMAINS THE SAME)
-  // Just copying the render part to ensure the file is complete
   if (!activeGroup) {
     return (
       <div className="flex flex-col items-center justify-center h-[60vh] p-6 text-center text-zinc-500 bg-[#020617]">

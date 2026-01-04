@@ -39,7 +39,7 @@ export async function POST(request: Request) {
         html = `
           <div style="font-family: sans-serif; color: #333; padding: 20px;">
             <h2 style="color: #00A896;">${title}</h2>
-            <p><strong>${payerName}</strong> ${verb} ${type === 'EXPENSE' ? `the expense <strong>"${description}"</strong>` : `a payment of <strong>${amountStr}</strong>`} in <strong>${groupName}</strong>.</p>
+            <p><strong>${payerName}</strong> ${verb} ${type === 'EXPENSE' ? `the expense <strong>"${description}"</strong>` : `A Settlement of <strong>${amountStr}</strong>`} in <strong>${groupName}</strong>.</p>
             ${type === 'EXPENSE' ? `<p>Total Amount: <strong>${amountStr}</strong></p>` : ''}
             <a href="https://travel-split-8.vercel.app" style="background-color: #00A896; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px;">Open App</a>
           </div>

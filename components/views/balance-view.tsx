@@ -168,6 +168,43 @@ export function BalanceView({ activeGroup, onSettleUp }: BalanceViewProps) {
     if (!selectedSettlement || !confirm("Delete this settlement permanently?")) return
 
     try {
+      // --- START: Email Notification Logic ---
+      const receiverId = selectedSettlement.expense_splits?.[0]?.user_id
+      const payerId = selectedSettlement.paid_by
+      
+      // Fetch emails to know who to notify
+      const { data: users } = await supabase
+        .from('profiles')
+        .select('id, full_name, email')
+        .in('id', [payerId, receiverId].filter(Boolean))
+
+      if (users) {
+        // We notify everyone involved EXCEPT the person deleting (currentUserId)
+        const recipients = users
+          .filter(u => u.id !== currentUserId && u.email)
+          .map(u => ({ email: u.email, name: u.full_name }))
+        
+        // Identify who is performing the action for the email body
+        const actor = users.find(u => u.id === currentUserId)
+        const actorName = actor?.full_name || "A friend"
+
+        if (recipients.length > 0) {
+           await fetch('/api/notify', {
+             method: 'POST',
+             body: JSON.stringify({
+               type: 'SETTLEMENT',
+               action: 'DELETED',
+               amount: selectedSettlement.amount,
+               payerName: actorName, 
+               groupName: activeGroup?.name || "Trip",
+               description: "Settlement",
+               recipients
+             })
+           })
+        }
+      }
+      // --- END: Email Notification Logic ---
+
       // Delete expenses (splits cascade usually, but good to be safe)
       const { error } = await supabase
         .from("expenses")
@@ -180,6 +217,7 @@ export function BalanceView({ activeGroup, onSettleUp }: BalanceViewProps) {
       setDetailOpen(false)
       loadBalances() // Refresh UI
     } catch (err) {
+      console.error("Delete failed", err)
       toast.error("Failed to delete")
     }
   }
