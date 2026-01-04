@@ -10,6 +10,7 @@ import { GroupsView } from "@/components/views/groups-view"
 import { LandingView } from "@/components/views/landing-view"
 import { AuthView } from "@/components/views/auth-view"
 import { BalanceView } from "@/components/views/balance-view"
+import { AnalyticsView } from "@/components/views/analytics-view" // Added Import
 import { ProfileSetupView } from "@/components/views/profile-setup-view"
 import { AddExpenseDrawer, ExpenseToEdit } from "@/components/add-expense-drawer"
 import { SettleUpDialog } from "@/components/settle-up-dialog"
@@ -61,6 +62,9 @@ export function MainApp({ initialUser, hasProfile }: MainAppProps) {
   const [expenseToEdit, setExpenseToEdit] = useState<ExpenseToEdit | null>(null)
   const [isAIAnalyzing, setIsAIAnalyzing] = useState(false)
   const [latestTip, setLatestTip] = useState<string | null>(null)
+  
+  // NEW: Analytics View State
+  const [showAnalytics, setShowAnalytics] = useState(false)
 
   // -------- Groups State (React Query powered) --------
   const { activeGroup, selectGroup, isLoadingGroups } =
@@ -158,6 +162,7 @@ export function MainApp({ initialUser, hasProfile }: MainAppProps) {
         }}
         settleUpOpen={settleUpOpen}
         setSettleUpOpen={setSettleUpOpen}
+        showFab={!showAnalytics}
       >
         <AnimatePresence mode="wait">
           {/* DASHBOARD */}
@@ -178,6 +183,9 @@ export function MainApp({ initialUser, hasProfile }: MainAppProps) {
                 latestTip={latestTip}
                 // FIX: Type assertion here to satisfy TypeScript
                 setActiveTab={(t: string) => setActiveTab(t as Tab)}
+                // NEW: Connect Analytics Button
+                // @ts-ignore - Prop will exist in updated Dashboard
+                onShowAnalytics={() => setShowAnalytics(true)}
               />
             </motion.div>
           )}
@@ -277,6 +285,16 @@ export function MainApp({ initialUser, hasProfile }: MainAppProps) {
             activeGroup={activeGroup}
             onSettled={() => setSettleUpOpen(false)}
           />
+
+        {/* NEW: Analytics Overlay */}
+        {showAnalytics && (
+          <div className="fixed inset-0 z-50 bg-[#020617]">
+            <AnalyticsView
+              activeGroup={activeGroup}
+              onBack={() => setShowAnalytics(false)}
+            />
+          </div>
+        )}
       </AppLayout>
     </div>
   )

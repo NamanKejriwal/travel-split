@@ -12,6 +12,7 @@ interface AppLayoutProps {
   setAddExpenseOpen: (open: boolean) => void
   settleUpOpen: boolean
   setSettleUpOpen: (open: boolean) => void
+  showFab?: boolean
 }
 
 export function AppLayout({
@@ -19,6 +20,7 @@ export function AppLayout({
   activeTab,
   onTabChange,
   setAddExpenseOpen,
+  showFab = true
 }: AppLayoutProps) {
   return (
     // ROOT CONTAINER
@@ -50,12 +52,14 @@ export function AppLayout({
            - This ensures it stays centered with the app on desktop, 
              rather than floating to the far right of the monitor.
         */}
+        {showFab && (
         <div className="absolute bottom-24 right-6 z-50 pointer-events-auto">
           <FabButton 
             onClick={() => setAddExpenseOpen(true)} 
             activeTab={activeTab} 
           />
         </div>
+        )}
 
         {/* BOTTOM NAVIGATION
            - Absolute bottom of the container

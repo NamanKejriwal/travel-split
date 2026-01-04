@@ -5,8 +5,8 @@ import { Button } from "@/components/ui/button"
 import { createClient } from "@/utils/supabase/client"
 import { 
   Loader2, Receipt, ArrowRightLeft, MapPin, 
-  AlertTriangle, Smartphone, Banknote, Target, Bell, 
-  Check, Lightbulb, X 
+  Smartphone, Banknote, Target, Bell, 
+  Check, Lightbulb, X, BarChart3 
 } from "lucide-react"
 import { Group } from "@/components/views/groups-view" 
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
@@ -22,7 +22,9 @@ interface DashboardProps {
   onEditExpense: (expense: ExpenseToEdit) => void;
   isAnalyzing?: boolean;
   latestTip?: string | null;
-  setActiveTab?: (tab: string) => void; 
+  setActiveTab?: (tab: string) => void;
+  // NEW: Prop to trigger the full screen analytics view
+  onShowAnalytics?: () => void; 
 }
 
 interface Expense {
@@ -66,7 +68,7 @@ const itemVariants = {
   show: { 
     opacity: 1, 
     y: 0, 
-    transition: { type: "spring", stiffness: 300, damping: 24 } as const // Added 'as const' here
+    transition: { type: "spring", stiffness: 300, damping: 24 } as const
   }
 }
 
@@ -111,7 +113,7 @@ const CATEGORY_COLORS: Record<string, string> = {
   "Hostel / Hotel": "#f59e0b", "Shopping": "#ec4899", "Activity": "#ef4444", "Other": "#9ca3af"          
 }
 
-export function Dashboard({ activeGroup, onSettleUp, onEditExpense, isAnalyzing, latestTip, setActiveTab }: DashboardProps) {
+export function Dashboard({ activeGroup, onSettleUp, onEditExpense, isAnalyzing, latestTip, setActiveTab, onShowAnalytics }: DashboardProps) {
   const [expenses, setExpenses] = useState<Expense[]>([])
   const [members, setMembers] = useState<Member[]>([])
   const [currentUser, setCurrentUser] = useState<any>(null)
@@ -121,20 +123,18 @@ export function Dashboard({ activeGroup, onSettleUp, onEditExpense, isAnalyzing,
   const [myPaid, setMyPaid] = useState(0)
   const [myShare, setMyShare] = useState(0)
   const [netBalance, setNetBalance] = useState(0)
-  const [categoryStats, setCategoryStats] = useState<{label: string, value: number, color: string}[]>([])
+  // These stats are calculated here for the small cards, but full analytics happen in the view
   const [methodStats, setMethodStats] = useState<{upi: number, cash: number}>({ upi: 0, cash: 0 })
   
   const [rawAlerts, setRawAlerts] = useState<AIAlertItem[]>([])
   const [alertsOpen, setAlertsOpen] = useState(false)
   const [activeTip, setActiveTip] = useState<string | null>(null)
-
+  
   useEffect(() => { if (latestTip) setActiveTip(latestTip) }, [latestTip])
   useEffect(() => { if (activeGroup) fetchData() }, [activeGroup])
   
-  // Real-time subscription for expenses
   useEffect(() => {
     if (!activeGroup) return
-    
     const channel = supabase
       .channel(`dashboard-expenses-${activeGroup.id}`)
       .on(
@@ -145,16 +145,10 @@ export function Dashboard({ activeGroup, onSettleUp, onEditExpense, isAnalyzing,
           event: "*",
           filter: `group_id=eq.${activeGroup.id}`
         },
-        () => {
-          // Silent refresh on any expense change
-          fetchData()
-        }
+        () => { fetchData() }
       )
       .subscribe()
-
-    return () => {
-      supabase.removeChannel(channel)
-    }
+    return () => { supabase.removeChannel(channel) }
   }, [activeGroup?.id])
 
   async function fetchData() {
@@ -191,17 +185,11 @@ export function Dashboard({ activeGroup, onSettleUp, onEditExpense, isAnalyzing,
       setMyPaid(allExpenses.filter(e => e.paid_by === user.id).reduce((sum, item) => sum + Number(item.amount), 0))
 
       const methods = { upi: 0, cash: 0 }
-      const catMap = new Map<string, number>()
       realExpenses.forEach(e => {
-        const cat = e.category || "Other"
-        catMap.set(cat, (catMap.get(cat) || 0) + Number(e.amount))
         if (e.payment_method === 'Cash') methods.cash += Number(e.amount)
         else methods.upi += Number(e.amount) 
       })
       setMethodStats(methods)
-      setCategoryStats(Array.from(catMap.entries()).map(([label, value]) => ({
-        label, value, color: CATEGORY_COLORS[label] || CATEGORY_COLORS["Other"]
-      })).sort((a, b) => b.value - a.value))
 
       const { data: mySplits } = await supabase.from('expense_splits').select('amount_owed, expense_id, expenses(is_settlement)').eq('user_id', user.id)
       const groupExpenseIds = new Set(allExpenses.map(e => e.id))
@@ -212,55 +200,6 @@ export function Dashboard({ activeGroup, onSettleUp, onEditExpense, isAnalyzing,
       setNetBalance(myBalanceData ? myBalanceData.net_balance : 0)
 
     } catch (error) { console.error(error) } finally { setLoading(false) }
-  }
-
-  const renderPieChart = () => {
-    if (totalCost === 0) return null
-    let cumulativePercent = 0
-    return (
-      <div className="flex flex-col gap-6 py-2">
-          <div className="flex items-center justify-center relative">
-              <svg viewBox="-1 -1 2 2" className="w-48 h-48 -rotate-90">
-                  {categoryStats.map((stat, i) => {
-                      const percent = stat.value / totalCost
-                      const startX = Math.cos(2 * Math.PI * cumulativePercent)
-                      const startY = Math.sin(2 * Math.PI * cumulativePercent)
-                      cumulativePercent += percent
-                      const endX = Math.cos(2 * Math.PI * cumulativePercent)
-                      const endY = Math.sin(2 * Math.PI * cumulativePercent)
-                      const largeArcFlag = percent > 0.5 ? 1 : 0
-                      const pathData = percent === 1 ? "M 1 0 A 1 1 0 1 1 -1 0 A 1 1 0 1 1 1 0 Z" : `M 0 0 L ${startX} ${startY} A 1 1 0 ${largeArcFlag} 1 ${endX} ${endY} Z`
-                      return (
-                          <motion.path 
-                              key={i} d={pathData} fill={stat.color} 
-                              initial={{ opacity: 0, scale: 0.8 }} animate={{ opacity: 1, scale: 1 }}
-                              transition={{ duration: 0.4, delay: i * 0.05 }} className="stroke-[#020617] stroke-[0.02]"
-                          />
-                      )
-                  })}
-              </svg>
-              <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-                  <div className="w-32 h-32 bg-[#020617] rounded-full flex flex-col items-center justify-center border border-white/5 shadow-2xl">
-                      <span className="text-[10px] text-zinc-500 uppercase tracking-widest font-semibold mb-0.5">Total</span>
-                      <span className="text-xl font-bold text-white tracking-tight"><AnimatedNumber value={totalCost} /></span>
-                  </div>
-              </div>
-          </div>
-          <div className="grid grid-cols-2 gap-3 px-2">
-              {categoryStats.map((stat, i) => (
-                  <div key={i} className="flex items-center justify-between p-2.5 rounded-xl bg-white/[0.03] border border-white/5">
-                      <div className="flex items-center gap-2.5 min-w-0">
-                          <div className="w-2 h-8 rounded-full" style={{ backgroundColor: stat.color }} />
-                          <div className="flex flex-col min-w-0">
-                              <span className="text-[11px] text-zinc-400 font-medium truncate">{stat.label}</span>
-                              <span className="text-xs font-bold text-white">₹{Math.round(stat.value).toLocaleString()}</span>
-                          </div>
-                      </div>
-                  </div>
-              ))}
-          </div>
-      </div>
-    )
   }
 
   if (!activeGroup) {
@@ -299,48 +238,63 @@ export function Dashboard({ activeGroup, onSettleUp, onEditExpense, isAnalyzing,
 
         <motion.div variants={containerVariants} initial="hidden" animate="show" className="relative z-10 px-5 pt-6 max-w-lg mx-auto space-y-8">
             
+            {/* 1. Header & Members */}
             <motion.div variants={itemVariants} className="space-y-4">
                 <div className="flex justify-between items-start">
                     <div className="space-y-1">
                         <h1 className="text-3xl font-black text-white tracking-tighter leading-none drop-shadow-xl">{activeGroup.name}</h1>
                         <p className="text-xs font-medium text-zinc-400 tracking-wide uppercase">Dashboard</p>
                     </div>
-                    <Dialog open={alertsOpen} onOpenChange={setAlertsOpen}>
-                        <DialogTrigger asChild>
-                            <Button variant="outline" size="icon" className="h-11 w-11 rounded-full bg-white/5 border-white/10 active:scale-95 transition-all shadow-lg text-zinc-300">
-                                <div className="relative">
-                                    <Bell className="h-5 w-5" />
-                                    {rawAlerts.length > 0 && <span className="absolute -top-0.5 -right-0.5 h-2.5 w-2.5 bg-rose-500 rounded-full border-2 border-[#020617]" />}
-                                </div>
-                            </Button>
-                        </DialogTrigger>
-                        <DialogContent className="bg-[#0f172a]/95 backdrop-blur-2xl border-white/10 text-white sm:max-w-md">
-                            <DialogHeader>
-                                <DialogTitle>Trip Insights</DialogTitle>
-                                <DialogDescription className="text-zinc-400">Budget alerts and financial tips.</DialogDescription>
-                            </DialogHeader>
-                            <div className="space-y-3 mt-4 max-h-[60vh] overflow-y-auto custom-scrollbar">
-                                {rawAlerts.length === 0 ? (
-                                    <div className="flex flex-col items-center py-8 text-zinc-500 gap-3">
-                                        <div className="p-3 bg-white/5 rounded-full"><Check className="h-6 w-6 text-[#00A896]" /></div>
-                                        <p className="text-sm">Everything looks good!</p>
+                    
+                    {/* BUTTONS: Charts & Alerts */}
+                    <div className="flex gap-2">
+                        {/* CHART BUTTON - Triggers Full Screen View */}
+                        <Button 
+                            variant="outline" 
+                            size="icon" 
+                            onClick={onShowAnalytics} 
+                            className="h-11 w-11 rounded-full bg-white/5 border-white/10 active:scale-95 transition-all shadow-lg text-zinc-300 hover:bg-[#00A896]/10 hover:text-[#00A896] hover:border-[#00A896]/30"
+                        >
+                            <BarChart3 className="h-5 w-5" />
+                        </Button>
+
+                        <Dialog open={alertsOpen} onOpenChange={setAlertsOpen}>
+                            <DialogTrigger asChild>
+                                <Button variant="outline" size="icon" className="h-11 w-11 rounded-full bg-white/5 border-white/10 active:scale-95 transition-all shadow-lg text-zinc-300">
+                                    <div className="relative">
+                                        <Bell className="h-5 w-5" />
+                                        {rawAlerts.length > 0 && <span className="absolute -top-0.5 -right-0.5 h-2.5 w-2.5 bg-rose-500 rounded-full border-2 border-[#020617]" />}
                                     </div>
-                                ) : (
-                                    rawAlerts.map((alert, idx) => (
-                                        <div key={idx} className="p-4 rounded-xl bg-white/5 border border-white/10">
-                                            <div className="flex items-center gap-2 mb-2">
-                                                <span className={cn("text-[10px] font-bold uppercase px-1.5 py-0.5 rounded", alert.severity === 'critical' ? "bg-rose-500/20 text-rose-400" : "bg-amber-500/20 text-amber-400")}>
-                                                    {alert.category}
-                                                </span>
-                                            </div>
-                                            <p className="text-sm font-medium text-zinc-200">{alert.message || alert.alert}</p>
-                                            <p className="text-xs text-zinc-500 mt-1 italic">{alert.advice}</p>
+                                </Button>
+                            </DialogTrigger>
+                            <DialogContent className="bg-[#0f172a]/95 backdrop-blur-2xl border-white/10 text-white sm:max-w-md">
+                                <DialogHeader>
+                                    <DialogTitle>Trip Insights</DialogTitle>
+                                    <DialogDescription className="text-zinc-400">Budget alerts and financial tips.</DialogDescription>
+                                </DialogHeader>
+                                <div className="space-y-3 mt-4 max-h-[60vh] overflow-y-auto custom-scrollbar">
+                                    {rawAlerts.length === 0 ? (
+                                        <div className="flex flex-col items-center py-8 text-zinc-500 gap-3">
+                                            <div className="p-3 bg-white/5 rounded-full"><Check className="h-6 w-6 text-[#00A896]" /></div>
+                                            <p className="text-sm">Everything looks good!</p>
                                         </div>
-                                    ))
-                                )}
-                            </div>
-                        </DialogContent>
-                    </Dialog>
+                                    ) : (
+                                        rawAlerts.map((alert, idx) => (
+                                            <div key={idx} className="p-4 rounded-xl bg-white/5 border border-white/10">
+                                                <div className="flex items-center gap-2 mb-2">
+                                                    <span className={cn("text-[10px] font-bold uppercase px-1.5 py-0.5 rounded", alert.severity === 'critical' ? "bg-rose-500/20 text-rose-400" : "bg-amber-500/20 text-amber-400")}>
+                                                        {alert.category}
+                                                    </span>
+                                                </div>
+                                                <p className="text-sm font-medium text-zinc-200">{alert.message || alert.alert}</p>
+                                                <p className="text-xs text-zinc-500 mt-1 italic">{alert.advice}</p>
+                                            </div>
+                                        ))
+                                    )}
+                                </div>
+                            </DialogContent>
+                        </Dialog>
+                    </div>
                 </div>
 
                 <div className="flex -space-x-3 overflow-x-auto pb-2 scrollbar-hide pl-1">
@@ -361,6 +315,7 @@ export function Dashboard({ activeGroup, onSettleUp, onEditExpense, isAnalyzing,
                 </div>
             </motion.div>
 
+            {/* 2. AI Insight */}
             <AnimatePresence>
                 {(isAnalyzing || (activeTip && !isAnalyzing)) && (
                     <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden">
@@ -377,6 +332,7 @@ export function Dashboard({ activeGroup, onSettleUp, onEditExpense, isAnalyzing,
                 )}
             </AnimatePresence>
 
+            {/* 3. Main Cost Card (Overview) */}
             <motion.div variants={itemVariants} className="relative">
                 <div className="absolute inset-0 bg-gradient-to-br from-[#00A896]/20 to-blue-600/20 rounded-[2rem] blur-xl opacity-50"></div>
                 <div className="relative bg-white/[0.03] backdrop-blur-xl border border-white/5 rounded-[2rem] p-6 shadow-2xl overflow-hidden">
@@ -412,6 +368,7 @@ export function Dashboard({ activeGroup, onSettleUp, onEditExpense, isAnalyzing,
                 </div>
             </motion.div>
 
+            {/* 4. Payment Methods */}
             <motion.div variants={itemVariants} className="grid grid-cols-2 gap-4">
                 <div className="bg-[#0f172a]/60 border border-white/5 rounded-2xl p-4 flex flex-col justify-between h-24 relative overflow-hidden active:scale-[0.98] active:bg-white/5 transition-all">
                     <div className="absolute top-0 right-0 p-3 opacity-10"><Smartphone className="h-12 w-12 text-blue-400 -mr-4 -mt-4 rotate-12" /></div>
@@ -425,18 +382,7 @@ export function Dashboard({ activeGroup, onSettleUp, onEditExpense, isAnalyzing,
                 </div>
             </motion.div>
 
-            {totalCost > 0 && (
-                <motion.div variants={itemVariants} className="space-y-4">
-                    <div className="flex items-center gap-2 px-1">
-                        <Target className="h-4 w-4 text-[#00A896]" />
-                        <h3 className="text-sm font-bold text-zinc-300 uppercase tracking-widest">Spend Analytics</h3>
-                    </div>
-                    <div className="bg-[#0f172a]/40 border border-white/5 rounded-[2rem] p-6 backdrop-blur-sm shadow-xl">
-                        {renderPieChart()}
-                    </div>
-                </motion.div>
-            )}
-
+            {/* 5. Recent Activity */}
             <motion.div variants={itemVariants} className="space-y-4">
                 <div className="flex items-center justify-between px-1">
                     <h3 className="text-lg font-bold text-white tracking-tight">Last 5 Activity</h3>
