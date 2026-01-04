@@ -256,6 +256,7 @@ export function SettleUpDialog({
       setSubmitting(false)
     }
   }
+  
   const PAYMENT_METHODS = [
     { value: "UPI", label: "UPI", icon: Smartphone, color: "text-blue-400", bg: "bg-blue-400/10" },
     { value: "Cash", label: "Cash", icon: Banknote, color: "text-emerald-400", bg: "bg-emerald-400/10" },
