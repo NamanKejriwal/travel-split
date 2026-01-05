@@ -13,6 +13,69 @@ interface Recipient {
 const BATCH_SIZE = 10; // Start small for testing
 
 export async function POST(request: Request) {
+  // ========== EXTREME DEBUGGING ==========
+  console.log("🚨🚨🚨 NOTIFY API - EXTREME DEBUGGING 🚨🚨🚨");
+  
+  // 1. Check environment variable directly
+  const brevoKeyFromEnv = process.env.BREVO_API_KEY;
+  console.log("1. Direct env access:", {
+    exists: !!brevoKeyFromEnv,
+    type: typeof brevoKeyFromEnv,
+    length: brevoKeyFromEnv?.length,
+    first10: brevoKeyFromEnv?.substring(0, 10),
+    value: brevoKeyFromEnv ? `${brevoKeyFromEnv.substring(0, 10)}...` : 'none'
+  });
+  
+  // 2. Check if it's falsy in different ways
+  console.log("2. Falsy checks:", {
+    notOperator: !brevoKeyFromEnv,
+    doubleNot: !!brevoKeyFromEnv,
+    equalsEmpty: brevoKeyFromEnv === '',
+    equalsNull: brevoKeyFromEnv === null,
+    equalsUndefined: brevoKeyFromEnv === undefined,
+    typeof: typeof brevoKeyFromEnv
+  });
+  
+  // 3. Try to send a test email IMMEDIATELY (bypass all your logic)
+  if (brevoKeyFromEnv && brevoKeyFromEnv.startsWith('xkeysib-')) {
+    console.log("3. Attempting immediate test email...");
+    try {
+      const testPayload = {
+        sender: { name: "TravelSplit Test", email: "tripsplit8@gmail.com" },
+        to: [{ email: "test@example.com", name: "Test" }],
+        subject: "Immediate Test from Notify API",
+        htmlContent: "<h1>Immediate Test</h1><p>This bypasses all logic</p>"
+      };
+      
+      const testResponse = await fetch("https://api.brevo.com/v3/smtp/email", {
+        method: "POST",
+        headers: {
+          "accept": "application/json",
+          "content-type": "application/json",
+          "api-key": brevoKeyFromEnv,
+        },
+        body: JSON.stringify(testPayload),
+      });
+      
+      console.log("4. Immediate test result:", {
+        status: testResponse.status,
+        ok: testResponse.ok
+      });
+      
+    } catch (testError: any) {
+      console.error("5. Immediate test failed:", testError.message);
+    }
+  } else {
+    console.error("3. Cannot run immediate test - key invalid:", {
+      hasKey: !!brevoKeyFromEnv,
+      startsWithXkeysib: brevoKeyFromEnv?.startsWith('xkeysib-'),
+      keyPreview: brevoKeyFromEnv?.substring(0, 20)
+    });
+  }
+  
+  console.log("6. Continuing to main logic...");
+  // ========== END DEBUGGING ==========
+
   // Log environment info
   console.log("=== NOTIFY API CALLED ===");
   console.log("Time:", new Date().toISOString());
@@ -46,32 +109,59 @@ export async function POST(request: Request) {
       );
     }
 
+    // Check Brevo API key with more detail - FIXED VERSION
     // Check Brevo API key with more detail
-    if (!process.env.BREVO_API_KEY) {
-      console.error("BREVO_API_KEY is undefined or empty");
-      console.log("All env vars:", Object.keys(process.env).sort());
+    const brevoKeyCheck = process.env.BREVO_API_KEY;
+    console.log("🔑 Checking BREVO_API_KEY in main logic:");
+    console.log("- Value:", brevoKeyCheck ? "PRESENT" : "ABSENT");
+    console.log("- Type:", typeof brevoKeyCheck);
+    console.log("- Length:", brevoKeyCheck?.length);
+    console.log("- Falsy evaluation:", !brevoKeyCheck);
+    console.log("- First 10 chars:", brevoKeyCheck?.substring(0, 10) + "...");
+    console.log("- In operator check:", 'BREVO_API_KEY' in process.env);
+
+    if (!brevoKeyCheck) {
+      console.error("❌❌❌ BREVO_API_KEY CHECK FAILED ❌❌❌");
+      console.error("This is why emails fail!");
+      console.error("Key value:", JSON.stringify(brevoKeyCheck));
+      console.error("Key exists in env:", 'BREVO_API_KEY' in process.env);
+      console.error("All env vars with API/KEY:", Object.keys(process.env).filter(k => k.includes('API') || k.includes('KEY')));
+      
       return NextResponse.json(
         { 
           success: false, 
           message: "Email service not configured",
           debug: {
-            envVars: Object.keys(process.env).filter(k => k.includes('BREVO') || k.includes('API'))
+            timestamp: new Date().toISOString(),
+            keyExists: !!brevoKeyCheck,
+            keyType: typeof brevoKeyCheck,
+            keyLength: brevoKeyCheck?.length,
+            envHasKey: 'BREVO_API_KEY' in process.env,
+            allEnvKeys: Object.keys(process.env).sort(),
+            filteredEnvKeys: Object.keys(process.env).filter(k => k.includes('API') || k.includes('KEY'))
           }
         },
         { status: 500 }
       );
     }
+    
+    // Now trim and continue
+    const brevoKey = brevoKeyCheck.trim();
+    console.log("✅ BREVO_API_KEY check passed");
+    console.log("- Trimmed length:", brevoKey.length);
+    console.log("- Starts with xkeysib-:", brevoKey.startsWith('xkeysib-'));
 
     // Validate API key format
-    if (!process.env.BREVO_API_KEY.startsWith('xkeysib-')) {
+    if (!brevoKey.startsWith('xkeysib-')) {
       console.error("Invalid Brevo API key format");
       return NextResponse.json(
         { 
           success: false, 
           message: "Invalid API key format",
           debug: { 
-            keyStartsWith: process.env.BREVO_API_KEY.substring(0, 10),
-            expectedStart: "xkeysib-"
+            keyStartsWith: brevoKey.substring(0, 10),
+            expectedStart: "xkeysib-",
+            fullKeyPreview: `${brevoKey.substring(0, 15)}...` // Safer - don't log full key
           }
         },
         { status: 500 }
@@ -104,7 +194,8 @@ export async function POST(request: Request) {
         html,
         type,
         action,
-        batchIndex: 0
+        batchIndex: 0,
+        apiKey: brevoKey  // Pass the trimmed key
       });
 
       console.log("✅ Test email sent successfully:", testResult.messageId);
@@ -123,7 +214,7 @@ export async function POST(request: Request) {
 
         const results = await Promise.allSettled(
           batches.map((batch, index) => 
-            sendEmailBatch(batch, subject, html, type, action, index + 1)
+            sendEmailBatch(batch, subject, html, type, action, index + 1, brevoKey)
           )
         );
 
@@ -188,7 +279,7 @@ export async function POST(request: Request) {
             message: "Invalid Brevo API key",
             debug: { 
               error: emailError.message,
-              apiKeyExists: !!process.env.BREVO_API_KEY
+              apiKeyExists: !!brevoKey
             }
           },
           { status: 401 }
@@ -237,14 +328,16 @@ async function sendSingleEmail({
   html,
   type,
   action,
-  batchIndex
+  batchIndex,
+  apiKey  // ADD THIS PARAMETER
 }: {
   recipient: Recipient,
   subject: string,
   html: string,
   type: string,
   action: string,
-  batchIndex: number
+  batchIndex: number,
+  apiKey: string  // ADD THIS PARAMETER
 }) {
   console.log(`Sending test email to ${recipient.email}...`);
   
@@ -258,7 +351,7 @@ async function sendSingleEmail({
       name: recipient.name || undefined,
     }],
     subject,
-    htmlContent: html, // ACTUAL HTML CONTENT
+    htmlContent: html,
     tags: ["travelsplit", type.toLowerCase(), action.toLowerCase(), `test_batch_${batchIndex}`],
     replyTo: {
       email: "tripsplit8@gmail.com",
@@ -277,9 +370,9 @@ async function sendSingleEmail({
     headers: {
       "accept": "application/json",
       "content-type": "application/json",
-      "api-key": process.env.BREVO_API_KEY!,
+      "api-key": apiKey,  // USE THE PASSED KEY
     },
-    body: JSON.stringify(payload), // NO REPLACER FUNCTION HERE
+    body: JSON.stringify(payload),
   });
 
   console.log("Brevo API response status:", response.status);
@@ -313,10 +406,11 @@ async function sendSingleEmail({
 async function sendEmailBatch(
   recipients: Recipient[], 
   subject: string, 
-  html: string, // ACTUAL HTML
+  html: string,
   type: string, 
   action: string,
-  batchIndex: number
+  batchIndex: number,
+  apiKey: string  // ADD THIS PARAMETER
 ) {
   const payload = {
     sender: {
@@ -328,7 +422,7 @@ async function sendEmailBatch(
       name: r.name || undefined,
     })),
     subject,
-    htmlContent: html, // ACTUAL HTML
+    htmlContent: html,
     tags: ["travelsplit", type.toLowerCase(), action.toLowerCase(), `batch_${batchIndex}`],
     replyTo: {
       email: "tripsplit8@gmail.com",
@@ -341,9 +435,9 @@ async function sendEmailBatch(
     headers: {
       "accept": "application/json",
       "content-type": "application/json",
-      "api-key": process.env.BREVO_API_KEY!,
+      "api-key": apiKey,  // USE THE PASSED KEY
     },
-    body: JSON.stringify(payload), // NO REPLACER
+    body: JSON.stringify(payload),
   });
 
   const data = await response.json();
