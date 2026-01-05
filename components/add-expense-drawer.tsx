@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState, useRef } from "react"
+import { useEffect, useState, useRef, useCallback } from "react"
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -44,6 +44,12 @@ interface Member {
   email?: string
 }
 
+interface Recipient {
+  email: string
+  name: string
+  amountOwed: number
+}
+
 const CATEGORY_CONFIG: Record<string, { icon: any, color: string, bg: string }> = {
   "Food": { icon: Utensils, color: "text-emerald-400", bg: "bg-emerald-400/10" },
   "Local Transport": { icon: Bus, color: "text-blue-400", bg: "bg-blue-400/10" },
@@ -72,21 +78,17 @@ export function AddExpenseDrawer({
   onAnalysisComplete,
   expenseToEdit
 }: AddExpenseDrawerProps) {
-
   const [currentStep, setCurrentStep] = useState(0)
   const [direction, setDirection] = useState(0)
-
   const [availableGroups, setAvailableGroups] = useState<Group[]>([])
   const [manualGroupId, setManualGroupId] = useState<string>("")
   const [members, setMembers] = useState<Member[]>([])
-
   const [amount, setAmount] = useState("")
   const [category, setCategory] = useState("Food")
   const [description, setDescription] = useState("")
   const [paymentMethod, setPaymentMethod] = useState("UPI")
   const [paidBy, setPaidBy] = useState("")
   const [splitWith, setSplitWith] = useState<string[]>([])
-
   const [loading, setLoading] = useState(false)
   const [submitting, setSubmitting] = useState(false)
 
@@ -97,10 +99,27 @@ export function AddExpenseDrawer({
   // Prevent bg scroll
   useEffect(() => {
     document.body.style.overflow = open ? "hidden" : "auto"
+    return () => {
+      document.body.style.overflow = "auto"
+    }
   }, [open])
 
+  // Initialize component
   useEffect(() => {
-    if (!open) return
+    if (!open) {
+      // Reset form after dialog closes (with delay for animation)
+      const timer = setTimeout(() => {
+        if (!open) {
+          setCurrentStep(0)
+          setAmount("")
+          setCategory("Food")
+          setDescription("")
+          setPaymentMethod("UPI")
+          setSplitWith([])
+        }
+      }, 300)
+      return () => clearTimeout(timer)
+    }
 
     setCurrentStep(0)
     setSubmitting(false)
@@ -116,123 +135,157 @@ export function AddExpenseDrawer({
         setPaidBy(expenseToEdit.paid_by)
         setPaymentMethod(expenseToEdit.payment_method || "UPI")
         await fetchExistingSplits(expenseToEdit.id)
-      } else {
-        setAmount("")
-        setCategory("Food")
-        setDescription("")
-        setPaymentMethod("UPI")
       }
     }
 
     init()
-    setTimeout(() => inputRef.current?.focus(), 150)
+    
+    // Focus input after a small delay for better UX
+    const focusTimer = setTimeout(() => {
+      if (open) inputRef.current?.focus()
+    }, 150)
+    
+    return () => clearTimeout(focusTimer)
+  }, [open, activeGroup, expenseToEdit])
 
-  }, [open])
-
-  async function fetchUserGroups() {
+  // Fetch user groups
+  const fetchUserGroups = useCallback(async () => {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return
-  
+
     const { data, error } = await supabase
       .from("group_members")
-      .select("groups(*)")   // 👈 fetch FULL group object
+      .select("groups(*)")
       .eq("user_id", user.id)
-  
+
     if (error) {
-      console.error("Failed to fetch groups", error)
+      console.error("Failed to fetch groups:", error)
+      toast.error("Could not load groups")
       return
     }
-  
-    // Normalize + ensure correct typing
+
     const groups: Group[] = (data || [])
-      // @ts-ignore
-      .map(item => Array.isArray(item.groups) ? item.groups[0] : item.groups)
+      .map(item => {
+        const group = item.groups as any
+        return Array.isArray(group) ? group[0] : group
+      })
       .filter(Boolean)
-  
+
     setAvailableGroups(groups)
-  
-    if (groups.length && !activeGroup)
+
+    if (groups.length && !activeGroup) {
       setManualGroupId(groups[0].id)
-  }
-  
-  async function fetchExistingSplits(id: string) {
-    const { data } = await supabase.from("expense_splits").select("user_id").eq("expense_id", id)
-    if (data) setSplitWith(data.map(s => s.user_id))
+    }
+  }, [activeGroup])
+
+  // Fetch existing splits for edit mode
+  const fetchExistingSplits = async (expenseId: string) => {
+    const { data, error } = await supabase
+      .from("expense_splits")
+      .select("user_id")
+      .eq("expense_id", expenseId)
+
+    if (error) {
+      console.error("Failed to fetch splits:", error)
+      toast.error("Could not load expense details")
+      return
+    }
+
+    if (data) {
+      setSplitWith(data.map(s => s.user_id))
+    }
   }
 
+  // Fetch members for the group
   useEffect(() => {
     if (targetGroupId) fetchMembers(targetGroupId)
   }, [targetGroupId])
 
-  async function fetchMembers(groupId: string) {
+  const fetchMembers = async (groupId: string) => {
     setLoading(true)
-  
-    const { data: { user } } = await supabase.auth.getUser()
-  
-    const { data, error } = await supabase
-      .from("group_members")
-      .select(`
-        user_id,
-        profiles (
-          id,
-          full_name,
-          email
-        )
-      `)
-      .eq("group_id", groupId)
-  
-    if (error) {
-      console.error("Failed to fetch members", error)
-      setLoading(false)
-      return
-    }
-  
-    const mapped: Member[] = (data || []).map(item => {
-      const profile = Array.isArray(item.profiles) ? item.profiles[0] : item.profiles
-      return {
-        id: item.user_id,
-        full_name: profile?.full_name || "Member",
-        email: profile?.email
-      }
-    })
-  
-    if (user && !mapped.find(m => m.id === user.id))
-      mapped.push({ id: user.id, full_name: "You" })
-  
-    setMembers(mapped)
-  
-    if (!expenseToEdit) {
-      if (user && !paidBy) setPaidBy(user.id)
-      else if (mapped.length > 0 && !paidBy) setPaidBy(mapped[0].id)
-  
-      setSplitWith(mapped.map(m => m.id))
-    }
-  
-    setLoading(false)
-  }
-  
-  // -------- AI LOGIC --------
-  async function checkAndSaveAlerts(groupId: string, newExpenseAmount: number, category: string) {
+
     try {
+      const { data: { user } } = await supabase.auth.getUser()
+
+      const { data, error } = await supabase
+        .from("group_members")
+        .select(`
+          user_id,
+          profiles (
+            id,
+            full_name,
+            email
+          )
+        `)
+        .eq("group_id", groupId)
+
+      if (error) throw error
+
+      const mapped: Member[] = (data || []).map(item => {
+        const profile = Array.isArray(item.profiles) ? item.profiles[0] : item.profiles
+        return {
+          id: item.user_id,
+          full_name: profile?.full_name || "Member",
+          email: profile?.email
+        }
+      })
+
+      // Add current user if not in list
+      if (user && !mapped.find(m => m.id === user.id)) {
+        mapped.push({ id: user.id, full_name: "You" })
+      }
+
+      setMembers(mapped)
+
+      // Initialize form fields
+      if (!expenseToEdit) {
+        if (user && !paidBy) setPaidBy(user.id)
+        else if (mapped.length > 0 && !paidBy) setPaidBy(mapped[0].id)
+
+        // Auto-select all members by default
+        setSplitWith(mapped.map(m => m.id))
+      }
+    } catch (error) {
+      console.error("Failed to fetch members:", error)
+      toast.error("Could not load group members")
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  // AI Analysis logic
+  const checkAndSaveAlerts = useCallback(async (
+    groupId: string, 
+    newExpenseAmount: number, 
+    category: string
+  ) => {
+    try {
+      // Skip AI for small amounts
       if (newExpenseAmount < 99) {
         onAnalysisComplete?.()
         return
       }
+
       const { data: { session } } = await supabase.auth.getSession()
       const token = session?.access_token
-      if (!token) return onAnalysisComplete?.()
+      if (!token) {
+        onAnalysisComplete?.()
+        return
+      }
 
-      const { data: group } = await supabase
+      // Fetch group settings
+      const { data: group, error: groupError } = await supabase
         .from("groups")
         .select("*")
         .eq("id", groupId)
         .single()
 
-      if (!group || !group.ai_alerts_enabled) {
+      if (groupError || !group || !group.ai_alerts_enabled) {
         onAnalysisComplete?.()
         return
       }
 
+      // Fetch recent expenses for context
       const { data: recentData } = await supabase
         .from("expenses")
         .select("description, amount, category")
@@ -245,17 +298,17 @@ export function AddExpenseDrawer({
         .select("amount")
         .eq("group_id", groupId)
 
-      const totalSpentSoFar =
-        allExpenses?.reduce((sum, e) => sum + Number(e.amount), 0) || 0
+      // Calculate totals
+      const totalSpentSoFar = allExpenses?.reduce((sum, e) => sum + Number(e.amount), 0) || 0
 
       const { count: memberCount } = await supabase
         .from("group_members")
         .select("*", { count: "exact", head: true })
         .eq("group_id", groupId)
 
-      const totalBudget =
-        (group.budget_per_person || 0) * (memberCount || 1)
+      const totalBudget = (group.budget_per_person || 0) * (memberCount || 1)
 
+      // Call AI analysis endpoint
       const res = await fetch("/api/analyze-spending", {
         method: "POST",
         headers: {
@@ -264,29 +317,19 @@ export function AddExpenseDrawer({
         },
         body: JSON.stringify({
           aiEnabled: true,
-        
           tripType: group.trip_type || "Leisure",
           destinations: group.destinations || [],
-        
           totalDays: group.total_days || 3,
           currentDay: group.current_day || 1,
-        
           budgetTotal: totalBudget,
           totalSpentSoFar,
-        
-          currentExpense: {
-            description,
-            amount: newExpenseAmount,
-            category
-          },
-        
+          currentExpense: { description, amount: newExpenseAmount, category },
           recentExpenses: (recentData || []).map(e => ({
             description: e.description,
             amount: Number(e.amount),
             category: e.category
           }))
         })
-        
       })
 
       if (!res.ok) {
@@ -295,41 +338,124 @@ export function AddExpenseDrawer({
       }
 
       const result = await res.json()
-
-      if (result?.tip) onAnalysisComplete?.(result.tip)
-      else onAnalysisComplete?.()
-
+      if (result?.tip) {
+        onAnalysisComplete?.(result.tip)
+      } else {
+        onAnalysisComplete?.()
+      }
     } catch (err) {
-      console.error("AI Alert Error", err)
+      console.error("AI Alert Error:", err)
       onAnalysisComplete?.()
+    }
+  }, [description, category, onAnalysisComplete])
+
+  // Send email notifications
+  const sendEmailNotifications = async (
+    recipients: Recipient[],
+    numAmount: number,
+    payerName: string,
+    groupName: string
+  ): Promise<boolean> => {
+    if (recipients.length === 0) return false
+
+    try {
+      const res = await fetch('/api/notify', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          type: 'EXPENSE',
+          action: isEditing ? 'EDITED' : 'ADDED',
+          amount: numAmount,
+          payerName,
+          groupName,
+          description,
+          recipients
+        })
+      })
+
+      if (!res.ok) {
+        const errorText = await res.text()
+        console.error("Email notification failed:", {
+          status: res.status,
+          statusText: res.statusText,
+          error: errorText
+        })
+        return false
+      }
+
+      const result = await res.json()
+      return result.success === true
+    } catch (err) {
+      console.error("Notify error:", err)
+      return false
     }
   }
 
-  // SAVE
-  async function handleSave() {
-    if (!targetGroupId || !amount || !description || !paidBy) return
+  // Main save handler
+  const handleSave = async () => {
+    if (!targetGroupId) {
+      toast.error("No group selected")
+      return
+    }
+    
+    if (!amount || parseFloat(amount) <= 0) {
+      toast.error("Enter a valid amount")
+      return
+    }
+    
+    if (!description.trim()) {
+      toast.error("Enter a description")
+      return
+    }
+    
+    if (!paidBy) {
+      toast.error("Select who paid")
+      return
+    }
+    
+    if (splitWith.length === 0) {
+      toast.error("Select at least one person to split with")
+      return
+    }
 
     setSubmitting(true)
 
     try {
       const numAmount = parseFloat(amount)
+      const splitAmt = parseFloat((numAmount / splitWith.length).toFixed(2))
       const payload = {
-        description,
+        description: description.trim(),
         amount: numAmount,
         paid_by: paidBy,
         category,
-        payment_method: paymentMethod
+        payment_method: paymentMethod,
+        updated_at: new Date().toISOString()
       }
 
       let expenseId = expenseToEdit?.id
 
+      // Database operations
       if (isEditing && expenseId) {
-        await supabase.from("expenses").update(payload).eq("id", expenseId)
+        // Update existing expense
+        const { error: expenseError } = await supabase
+          .from("expenses")
+          .update(payload)
+          .eq('id', expenseId)
+
+        if (expenseError) throw expenseError
+
+        // Recreate splits
         await supabase.from("expense_splits").delete().eq("expense_id", expenseId)
       } else {
+        // Create new expense - let database handle created_at
         const { data, error } = await supabase
           .from("expenses")
-          .insert({ group_id: targetGroupId, ...payload })
+          .insert({ 
+            group_id: targetGroupId, 
+            ...payload
+          })
           .select()
           .single()
 
@@ -337,93 +463,99 @@ export function AddExpenseDrawer({
         expenseId = data.id
       }
 
-      if (splitWith.length === 0) throw new Error("Select at least one person")
+      // Create expense splits - let database handle created_at
+      const { error: splitError } = await supabase
+        .from("expense_splits")
+        .insert(
+          splitWith.map(userId => ({
+            expense_id: expenseId!,
+            user_id: userId,
+            amount_owed: splitAmt
+          }))
+        )
 
-      const splitAmt = numAmount / splitWith.length
+      if (splitError) throw splitError
 
-      await supabase.from("expense_splits")
-        .insert(splitWith.map(uid => ({
-          expense_id: expenseId!,
-          user_id: uid,
-          amount_owed: splitAmt
-        })))
-
-      toast.success(isEditing ? "Updated" : "Saved")
+      // Success feedback
       trackEvent.expenseAdded(numAmount, category, splitWith.length)
-
       onExpenseAdded?.(true)
 
-      // === EMAIL NOTIFICATION LOGIC ===
+      // Email notifications
+      let emailSent = false
       try {
         const { data: { user } } = await supabase.auth.getUser()
         const payerName = user?.user_metadata?.full_name || "A friend"
-        const groupName = activeGroup?.name || availableGroups.find(g => g.id === targetGroupId)?.name || "Trip"
+        const groupName = activeGroup?.name || 
+                         availableGroups.find(g => g.id === targetGroupId)?.name || 
+                         "Trip"
 
-        const recipients = members
+        const recipients: Recipient[] = members
           .filter(m => splitWith.includes(m.id) && m.id !== user?.id && m.email)
           .map(m => ({
-            email: m.email,
+            email: m.email!,
             name: m.full_name,
-            amountOwed: numAmount / splitWith.length
+            amountOwed: splitAmt
           }))
 
         if (recipients.length > 0) {
-          console.log("Sending email notifications to:", recipients.length, "people");
-          
-          // Use await to ensure the request is actually sent before component unmounts
-          const res = await fetch('/api/notify', {
-            method: 'POST',
-            body: JSON.stringify({
-              type: 'EXPENSE',
-              action: isEditing ? 'EDITED' : 'ADDED',
-              amount: numAmount,
-              payerName,
-              groupName,
-              description,
-              recipients
-            })
-          })
-          
-          if (!res.ok) {
-             const errData = await res.json().catch(() => ({}))
-             console.error("Email notification failed:", errData)
-          } else {
-             console.log("Email notification sent successfully")
-          }
-        } else {
-          console.warn("No recipients found with email addresses for notification")
+          emailSent = await sendEmailNotifications(recipients, numAmount, payerName, groupName)
         }
-      } catch (err) { console.error("Notify error", err) }
-      // ================================
+      } catch (emailErr) {
+        console.error("Email preparation error:", emailErr)
+      }
 
-      await checkAndSaveAlerts(targetGroupId, numAmount, category)
+      // Show appropriate success message
+      if (emailSent) {
+        toast.success(isEditing ? "Updated and notification sent!" : "Saved and notification sent!")
+      } else {
+        toast.success(isEditing ? "Expense updated!" : "Expense saved!")
+      }
 
+      // Trigger AI analysis (fire-and-forget)
+      checkAndSaveAlerts(targetGroupId, numAmount, category)
+
+      // Small delay for better UX before closing
+      await new Promise(resolve => setTimeout(resolve, 500))
+
+      // Close dialog
       onOpenChange(false)
 
-    } catch (e: any) {
-      toast.error(e.message)
+    } catch (error: any) {
+      console.error("Save error:", error)
+      toast.error(error.message || "Failed to save expense")
     } finally {
       setSubmitting(false)
     }
   }
 
+  // Navigation handlers
   const handleNext = () => {
-    if (currentStep === 0 && (!amount || parseFloat(amount) <= 0)) return toast.error("Enter valid amount")
-    if (currentStep === 1 && !description) return toast.error("Enter description")
+    if (currentStep === 0 && (!amount || parseFloat(amount) <= 0)) {
+      return toast.error("Enter a valid amount")
+    }
+    
+    if (currentStep === 1 && !description.trim()) {
+      return toast.error("Enter a description")
+    }
+    
     setDirection(1)
-    setCurrentStep(s => s + 1)
+    setCurrentStep(s => Math.min(s + 1, STEPS.length - 1))
   }
 
   const handleBack = () => {
     setDirection(-1)
-    setCurrentStep(s => s - 1)
+    setCurrentStep(s => Math.max(s - 1, 0))
   }
 
-  const toggleSplitMember = (id: string) =>
-    setSplitWith(curr =>
-      curr.includes(id) ? curr.filter(x => x !== id) : [...curr, id]
+  const toggleSplitMember = (id: string) => {
+    setSplitWith(curr => 
+      curr.includes(id) 
+        ? curr.filter(x => x !== id) 
+        : [...curr, id]
     )
+  }
 
+  // Early return if no valid context
   if (!activeGroup && !manualGroupId && !expenseToEdit) return null
 
   return (
@@ -437,22 +569,39 @@ export function AddExpenseDrawer({
           h-[88vh]
           flex flex-col
           overflow-hidden
+          shadow-2xl
         "
       >
-        <DialogTitle className="sr-only">Add Expense</DialogTitle>
+        <DialogTitle className="sr-only">
+          {isEditing ? "Edit Expense" : "Add New Expense"}
+        </DialogTitle>
 
-        <div className="px-6 pt-5 pb-3 flex items-center justify-between shrink-0">
+        {/* Header with navigation */}
+        <div className="px-6 pt-5 pb-3 flex items-center justify-between shrink-0 border-b border-white/5">
           {currentStep > 0 ? (
-            <Button variant="ghost" size="icon" onClick={handleBack} className="rounded-full w-10 h-10 bg-white/5 text-zinc-400">
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={handleBack}
+              className="rounded-full w-10 h-10 bg-white/5 text-zinc-400 hover:bg-white/10 transition-colors"
+              aria-label="Go back"
+            >
               <ChevronLeft className="w-5 h-5" />
             </Button>
           ) : (
-            <Button variant="ghost" size="icon" onClick={() => onOpenChange(false)} className="rounded-full w-10 h-10 bg-white/5 text-zinc-400">
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => onOpenChange(false)}
+              className="rounded-full w-10 h-10 bg-white/5 text-zinc-400 hover:bg-white/10 transition-colors"
+              aria-label="Close"
+            >
               <X className="w-5 h-5" />
             </Button>
           )}
 
-          <div className="flex gap-2">
+          {/* Step indicators */}
+          <div className="flex gap-2" aria-label="Progress steps">
             {STEPS.map((_, idx) => (
               <motion.div
                 key={idx}
@@ -460,15 +609,18 @@ export function AddExpenseDrawer({
                   width: idx === currentStep ? 32 : 8,
                   backgroundColor: idx <= currentStep ? "#00A896" : "#27272a"
                 }}
+                transition={{ type: "spring", stiffness: 300, damping: 20 }}
                 className="h-1.5 rounded-full"
+                aria-current={idx === currentStep ? "step" : undefined}
               />
             ))}
           </div>
 
-          <div className="w-10" />
+          <div className="w-10" /> {/* Spacer for alignment */}
         </div>
 
-        <div className="flex-1 overflow-y-auto px-6 pb-20">
+        {/* Main content area */}
+        <div className="flex-1 overflow-y-auto px-6 pb-20 scrollbar-thin scrollbar-track-transparent scrollbar-thumb-white/10">
           <AnimatePresence mode="wait" initial={false} custom={direction}>
             <motion.div
               key={currentStep}
@@ -476,32 +628,60 @@ export function AddExpenseDrawer({
               initial={{ x: direction > 0 ? 40 : -40, opacity: 0 }}
               animate={{ x: 0, opacity: 1 }}
               exit={{ x: direction > 0 ? -40 : 40, opacity: 0 }}
-              transition={{ type: "spring" as const, stiffness: 260, damping: 25 }}
+              transition={{ 
+                type: "spring", 
+                stiffness: 260, 
+                damping: 25,
+                opacity: { duration: 0.2 }
+              }}
               className="h-full flex flex-col"
             >
+              {/* Step 1: Amount */}
               {currentStep === 0 && (
-                <div className="flex flex-col items-center justify-center h-full">
-                  <p className="text-zinc-500 text-sm mb-4">Total Amount</p>
+                <div className="flex flex-col items-center justify-center h-full py-8">
+                  <p className="text-zinc-500 text-sm mb-6 font-medium">Total Amount</p>
                   <div className="relative flex items-center justify-center">
-                    <span className="text-5xl font-bold text-[#00A896] mr-1 mt-1">₹</span>
+                    <span 
+                      className="text-5xl font-bold text-[#00A896] mr-2 mt-1"
+                      aria-hidden="true"
+                    >
+                      ₹
+                    </span>
                     <input
                       ref={inputRef}
                       inputMode="numeric"
+                      type="text"
                       value={amount}
-                      onChange={e => setAmount(e.target.value)}
+                      onChange={(e) => {
+                        const value = e.target.value.replace(/[^0-9.]/g, '')
+                        if (value === '' || /^\d*\.?\d*$/.test(value)) {
+                          setAmount(value)
+                        }
+                      }}
                       placeholder="0"
-                      className="w-full max-w-[260px] text-7xl font-bold bg-transparent border-none text-center caret-[#00A896] outline-none"
+                      className="w-full max-w-[280px] text-7xl font-bold bg-transparent border-none text-center caret-[#00A896] outline-none placeholder:text-zinc-600/50"
+                      aria-label="Enter amount in Indian Rupees"
                     />
                   </div>
+                  <p className="text-zinc-500 text-sm mt-6">
+                    Press <span className="text-[#00A896] font-semibold">Enter</span> or tap <span className="text-[#00A896] font-semibold">Next</span> to continue
+                  </p>
                 </div>
               )}
 
+              {/* Step 2: Details */}
               {currentStep === 1 && (
                 <div className="space-y-8 pt-6">
-                  <h2 className="text-2xl font-bold text-center">What is this for?</h2>
+                  <h2 className="text-2xl font-bold text-center text-white">
+                    What is this for?
+                  </h2>
+                  
+                  {/* Categories */}
                   <div className="grid grid-cols-3 gap-3">
                     {CATEGORIES.map(cat => {
+                      const Icon = cat.icon
                       const isSelected = category === cat.id
+                      
                       return (
                         <motion.button
                           key={cat.id}
@@ -509,13 +689,20 @@ export function AddExpenseDrawer({
                           whileTap={{ scale: 0.95 }}
                           className={cn(
                             "flex flex-col items-center justify-center p-4 rounded-2xl border transition-all space-y-3",
-                            isSelected ? "border-[#00A896] bg-[#00A896]/10" : "border-white/5 bg-white/5"
+                            "focus:outline-none focus:ring-2 focus:ring-[#00A896] focus:ring-offset-2 focus:ring-offset-[#020617]",
+                            isSelected 
+                              ? "border-[#00A896] bg-[#00A896]/10" 
+                              : "border-white/5 bg-white/5 hover:bg-white/10"
                           )}
+                          aria-pressed={isSelected}
                         >
                           <div className={cn("p-3 rounded-full", cat.bg)}>
-                            <cat.icon className={cn("w-6 h-6", cat.color)} />
+                            <Icon className={cn("w-6 h-6", cat.color)} />
                           </div>
-                          <span className={cn("text-xs font-semibold", isSelected ? "text-white" : "text-zinc-400")}>
+                          <span className={cn(
+                            "text-xs font-semibold",
+                            isSelected ? "text-white" : "text-zinc-400"
+                          )}>
                             {cat.label}
                           </span>
                         </motion.button>
@@ -523,33 +710,60 @@ export function AddExpenseDrawer({
                     })}
                   </div>
 
+                  {/* Description */}
                   <div className="space-y-3">
-                    <Label className="text-zinc-400 text-xs ml-1">Note</Label>
+                    <Label 
+                      htmlFor="expense-description" 
+                      className="text-zinc-400 text-xs font-medium ml-1"
+                    >
+                      Note / Description
+                    </Label>
                     <Input
+                      id="expense-description"
                       value={description}
                       onChange={e => setDescription(e.target.value)}
-                      placeholder="e.g. Dinner"
-                      className="bg-white/5 border-white/10 text-white h-14 rounded-2xl pl-5 text-lg placeholder:text-zinc-600"
+                      placeholder="e.g., Dinner at restaurant, Taxi ride, Hotel stay"
+                      className="bg-white/5 border-white/10 text-white h-14 rounded-2xl pl-5 text-lg placeholder:text-zinc-600 focus:border-[#00A896] focus:ring-[#00A896] transition-colors"
+                      maxLength={100}
                     />
+                    <p className="text-xs text-zinc-500 text-right">
+                      {description.length}/100 characters
+                    </p>
                   </div>
                 </div>
               )}
 
+              {/* Step 3: Split */}
               {currentStep === 2 && (
                 <div className="space-y-8 pt-4">
-                  <h2 className="text-2xl font-bold text-center">Who is paying?</h2>
+                  <h2 className="text-2xl font-bold text-center text-white">
+                    Who is paying?
+                  </h2>
 
+                  {/* Payment Details Card */}
                   <div className="bg-white/5 rounded-3xl p-5 space-y-4 border border-white/5">
                     <div className="flex items-center justify-between">
-                      <span className="text-zinc-400 text-sm">Paid By</span>
+                      <span className="text-zinc-400 text-sm font-medium">Paid By</span>
                       <Select value={paidBy} onValueChange={setPaidBy}>
-                        <SelectTrigger className="bg-transparent border-none shadow-none text-right">
-                          <SelectValue />
+                        <SelectTrigger 
+                          className="bg-transparent border-none shadow-none text-right text-white hover:bg-white/5 px-3 py-2 rounded-lg"
+                          aria-label="Select who paid"
+                        >
+                          <SelectValue placeholder="Select person" />
                         </SelectTrigger>
                         <SelectContent className="bg-[#0f172a] text-white border-white/10">
                           {members.map(m => (
-                            <SelectItem key={m.id} value={m.id}>
-                              {m.full_name}
+                            <SelectItem 
+                              key={m.id} 
+                              value={m.id}
+                              className="focus:bg-white/10 focus:text-white"
+                            >
+                              <div className="flex items-center gap-2">
+                                <div className="h-6 w-6 rounded-full bg-[#00A896]/20 flex items-center justify-center text-xs font-bold text-[#00A896]">
+                                  {m.full_name.charAt(0)}
+                                </div>
+                                {m.full_name}
+                              </div>
                             </SelectItem>
                           ))}
                         </SelectContent>
@@ -559,24 +773,62 @@ export function AddExpenseDrawer({
                     <div className="w-full h-px bg-white/10" />
 
                     <div className="flex items-center justify-between">
-                      <span className="text-zinc-400 text-sm">Method</span>
+                      <span className="text-zinc-400 text-sm font-medium">Payment Method</span>
                       <Select value={paymentMethod} onValueChange={setPaymentMethod}>
-                        <SelectTrigger className="bg-transparent border-none shadow-none text-right">
-                          <SelectValue />
+                        <SelectTrigger 
+                          className="bg-transparent border-none shadow-none text-right text-white hover:bg-white/5 px-3 py-2 rounded-lg"
+                          aria-label="Select payment method"
+                        >
+                          <SelectValue placeholder="Select method" />
                         </SelectTrigger>
                         <SelectContent className="bg-[#0f172a] text-white border-white/10">
-                          <SelectItem value="UPI"><span className="flex items-center gap-2"><Smartphone className="w-4 h-4" /> UPI</span></SelectItem>
-                          <SelectItem value="Cash"><span className="flex items-center gap-2"><Wallet className="w-4 h-4" /> Cash</span></SelectItem>
-                          <SelectItem value="Card"><span className="flex items-center gap-2"><CreditCard className="w-4 h-4" /> Card</span></SelectItem>
+                          <SelectItem value="UPI">
+                            <span className="flex items-center gap-2">
+                              <Smartphone className="w-4 h-4" /> UPI
+                            </span>
+                          </SelectItem>
+                          <SelectItem value="Cash">
+                            <span className="flex items-center gap-2">
+                              <Wallet className="w-4 h-4" /> Cash
+                            </span>
+                          </SelectItem>
+                          <SelectItem value="Card">
+                            <span className="flex items-center gap-2">
+                              <CreditCard className="w-4 h-4" /> Card
+                            </span>
+                          </SelectItem>
                         </SelectContent>
                       </Select>
                     </div>
                   </div>
 
-                  <div className="space-y-2">
-                  <h2 className="text-zinc-400 text-sm font-medium ml-1 pb-1">Split Between</h2>
+                  {/* Split Between Section */}
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <h3 className="text-zinc-400 text-sm font-medium ml-1">
+                        Split Between ({splitWith.length} selected)
+                      </h3>
+                      {members.length > 1 && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => {
+                            const allSelected = splitWith.length === members.length
+                            setSplitWith(allSelected ? [] : members.map(m => m.id))
+                          }}
+                          className="text-xs text-[#00A896] hover:text-[#00A896]/80 hover:bg-[#00A896]/10"
+                        >
+                          {splitWith.length === members.length ? "Deselect All" : "Select All"}
+                        </Button>
+                      )}
+                    </div>
+                    
                     {members.map(member => {
                       const isSelected = splitWith.includes(member.id)
+                      const splitAmount = amount && splitWith.length > 0 
+                        ? parseFloat((parseFloat(amount) / splitWith.length).toFixed(2))
+                        : 0
+                      
                       return (
                         <motion.button
                           key={member.id}
@@ -584,27 +836,44 @@ export function AddExpenseDrawer({
                           whileTap={{ scale: 0.98 }}
                           className={cn(
                             "w-full flex items-center justify-between p-4 rounded-2xl border transition-all",
-                            isSelected ? "bg-[#00A896]/10 border-[#00A896]" : "bg-white/[0.02] border-white/5"
+                            "focus:outline-none focus:ring-2 focus:ring-[#00A896] focus:ring-offset-2 focus:ring-offset-[#020617]",
+                            isSelected 
+                              ? "bg-[#00A896]/10 border-[#00A896]" 
+                              : "bg-white/[0.02] border-white/5 hover:bg-white/[0.05]"
                           )}
+                          aria-pressed={isSelected}
                         >
                           <div className="flex items-center gap-4">
                             <div className={cn(
-                              "w-10 h-10 rounded-full flex items-center justify-center",
-                              isSelected ? "bg-[#00A896] text-white" : "bg-white/10 text-zinc-400"
+                              "w-10 h-10 rounded-full flex items-center justify-center font-bold",
+                              "transition-colors",
+                              isSelected 
+                                ? "bg-[#00A896] text-white" 
+                                : "bg-white/10 text-zinc-400"
                             )}>
-                              {member.full_name.charAt(0)}
+                              {member.full_name.charAt(0).toUpperCase()}
                             </div>
-                            <span className={cn(
-                              "font-medium text-lg",
-                              isSelected ? "text-white" : "text-zinc-400"
-                            )}>
-                              {member.full_name}
-                            </span>
+                            <div className="text-left">
+                              <span className={cn(
+                                "font-medium text-lg block",
+                                isSelected ? "text-white" : "text-zinc-400"
+                              )}>
+                                {member.full_name}
+                              </span>
+                              {isSelected && amount && splitWith.length > 0 && (
+                                <span className="text-sm text-[#00A896] font-medium">
+                                  ₹{splitAmount.toLocaleString('en-IN')}
+                                </span>
+                              )}
+                            </div>
                           </div>
 
                           <div className={cn(
                             "w-6 h-6 rounded-full border-2 flex items-center justify-center",
-                            isSelected ? "border-[#00A896] bg-[#00A896]" : "border-zinc-600"
+                            "transition-colors",
+                            isSelected 
+                              ? "border-[#00A896] bg-[#00A896]" 
+                              : "border-zinc-600"
                           )}>
                             {isSelected && <Check className="w-4 h-4 text-white" />}
                           </div>
@@ -618,17 +887,24 @@ export function AddExpenseDrawer({
           </AnimatePresence>
         </div>
 
-        <div className="p-5 border-t border-white/10 bg-[#020617]/90 backdrop-blur-lg">
+        {/* Footer with action button */}
+        <div className="p-5 border-t border-white/10 bg-[#020617]/90 backdrop-blur-lg sticky bottom-0">
           <Button
             onClick={currentStep === 2 ? handleSave : handleNext}
-            disabled={submitting}
-            className="w-full h-14 text-lg font-bold rounded-xl bg-[#00A896]"
+            disabled={submitting || loading}
+            className="w-full h-14 text-lg font-bold rounded-xl bg-[#00A896] hover:bg-[#00A896]/90 active:scale-[0.98] transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-[#00A896]/20"
+            size="lg"
           >
-            {submitting
-              ? <Loader2 className="w-5 h-5 animate-spin" />
-              : currentStep === 2
-                ? (isEditing ? "Update Expense" : "Confirm Expense")
-                : "Next"}
+            {submitting ? (
+              <>
+                <Loader2 className="w-5 h-5 animate-spin mr-2" />
+                {isEditing ? "Updating..." : "Saving..."}
+              </>
+            ) : currentStep === 2 ? (
+              isEditing ? "Update Expense" : `Confirm (₹${amount ? parseFloat(amount).toLocaleString('en-IN') : "0"})`
+            ) : (
+              "Next"
+            )}
           </Button>
         </div>
       </DialogContent>

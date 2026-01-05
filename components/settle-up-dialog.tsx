@@ -218,6 +218,8 @@ export function SettleUpDialog({
       // ====================================================
       // 2. EMAIL NOTIFICATION (Runs for both Add & Edit)
       // ====================================================
+      let emailSuccess = false
+      
       try {
         const { data: recipient } = await supabase
           .from('profiles')
@@ -226,27 +228,70 @@ export function SettleUpDialog({
           .single()
 
         if (recipient?.email) {
-          // Fire and forget - don't await this
-          fetch('/api/notify', {
+          // Use await to ensure email is sent before closing dialog
+          const response = await fetch('/api/notify', {
             method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
             body: JSON.stringify({
               type: 'SETTLEMENT',
               action: paymentToEdit ? 'EDITED' : 'ADDED',
               amount: numAmount,
               payerName: user.user_metadata?.full_name || "A friend",
               groupName: activeGroup?.name || "Trip",
-              recipients: [{ email: recipient.email, name: recipient.full_name }]
+              recipients: [{ 
+                email: recipient.email, 
+                name: recipient.full_name 
+              }]
             })
-          })
+          });
+
+          if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`)
+          }
+
+          const result = await response.json()
+          emailSuccess = result.success
         }
-      } catch (e) { 
-        console.error("Email notification failed", e) 
+      } catch (emailError: any) { 
+        console.error("Email notification failed:", emailError)
+        // Don't throw here - we don't want email failure to block the transaction
       }
 
       // ====================================================
-      // 3. CLEANUP
+      // 3. CLEANUP & SUCCESS FEEDBACK
       // ====================================================
+      
+      // Show success message
+      if (emailSuccess) {
+        toast.success(
+          paymentToEdit 
+            ? "Payment updated and notification sent!" 
+            : "Settlement recorded and notification sent!",
+          {
+            duration: 3000
+          }
+        )
+      } else {
+        toast.success(
+          paymentToEdit 
+            ? "Payment updated!" 
+            : "Settlement recorded!",
+          {
+            description: emailSuccess === false ? "Notification could not be sent" : undefined,
+            duration: 3000
+          }
+        )
+      }
+
+      // Wait a moment before closing for better UX
+      await new Promise(resolve => setTimeout(resolve, 500))
+
+      // Trigger parent callback
       onSettled()
+      
+      // Close dialog after parent callback
       onOpenChange(false)
 
     } catch (e: any) {

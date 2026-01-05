@@ -16,8 +16,11 @@ export async function POST(request: Request) {
     return NextResponse.json({ message: "No recipients" });
   }
 
+  // 1. SOLID FIX: Use explicit SMTP settings for Gmail
   const transporter = nodemailer.createTransport({
-    service: 'gmail',
+    host: 'smtp.gmail.com',
+    port: 465,
+    secure: true, // use SSL
     auth: {
       user: process.env.GMAIL_USER,
       pass: process.env.GMAIL_APP_PASSWORD,
@@ -25,6 +28,18 @@ export async function POST(request: Request) {
   });
 
   try {
+    // 2. DEBUGGING: Verify connection before sending (Optional but helpful)
+    await new Promise((resolve, reject) => {
+        transporter.verify(function (error, success) {
+            if (error) {
+                console.error("Transporter verification failed:", error);
+                reject(error);
+            } else {
+                resolve(success);
+            }
+        });
+    });
+
     const promises = recipients.map((r: any) => {
       let subject = "";
       let html = "";
