@@ -2,178 +2,362 @@
 import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
-export const maxDuration = 30; // Increased for batching
+export const maxDuration = 30;
 
 interface Recipient {
-  email: string;
-  name?: string;
-  amountOwed?: number;
+  email: string;
+  name?: string;
+  amountOwed?: number;
 }
 
-const BATCH_SIZE = 50; // Brevo allows up to 1000 recipients per batch, 50 is safe
+const BATCH_SIZE = 10; // Start small for testing
 
 export async function POST(request: Request) {
-  try {
-    // Parse request
-    const {
-      type, // 'EXPENSE' | 'SETTLEMENT' | 'GROUP'
-      action, // 'ADDED' | 'EDITED' | 'DELETED' | 'MEMBER_REMOVED' | 'OWNERSHIP_TRANSFERRED'
-      amount,
-      payerName = "A friend",
-      groupName = "Trip",
-      recipients,
-      description = "",
-    } = await request.json();
+  // Log environment info
+  console.log("=== NOTIFY API CALLED ===");
+  console.log("Time:", new Date().toISOString());
+  console.log("Node Environment:", process.env.NODE_ENV);
+  console.log("BREVO_API_KEY exists:", !!process.env.BREVO_API_KEY);
+  console.log("BREVO_API_KEY length:", process.env.BREVO_API_KEY?.length);
+  console.log("BREVO_API_KEY first 10 chars:", process.env.BREVO_API_KEY?.substring(0, 10) + "...");
+  console.log("NEXT_PUBLIC_APP_URL:", process.env.NEXT_PUBLIC_APP_URL);
+  
+  try {
+    // Parse request
+    const body = await request.json();
+    console.log("Request body:", JSON.stringify(body, null, 2));
 
-    // Validate
-    if (!Array.isArray(recipients) || recipients.length === 0) {
-      return NextResponse.json(
-        { success: false, message: "No recipients" },
-        { status: 400 }
-      );
-    }
+    const {
+      type, // 'EXPENSE' | 'SETTLEMENT' | 'GROUP'
+      action, // 'ADDED' | 'EDITED' | 'DELETED' | 'MEMBER_REMOVED' | 'OWNERSHIP_TRANSFERRED'
+      amount,
+      payerName = "A friend",
+      groupName = "Trip",
+      recipients,
+      description = "",
+    } = body;
 
-    if (!process.env.BREVO_API_KEY) {
-      console.error("BREVO_API_KEY missing");
-      return NextResponse.json(
-        { success: false, message: "Email service not configured" },
-        { status: 500 }
-      );
-    }
+    // Validate
+    if (!Array.isArray(recipients) || recipients.length === 0) {
+      console.log("No recipients array or empty");
+      return NextResponse.json(
+        { success: false, message: "No recipients" },
+        { status: 400 }
+      );
+    }
 
-    console.log(`📧 Preparing to send ${type} email to ${recipients.length} recipients`);
+    // Check Brevo API key with more detail
+    if (!process.env.BREVO_API_KEY) {
+      console.error("BREVO_API_KEY is undefined or empty");
+      console.log("All env vars:", Object.keys(process.env).sort());
+      return NextResponse.json(
+        { 
+          success: false, 
+          message: "Email service not configured",
+          debug: {
+            envVars: Object.keys(process.env).filter(k => k.includes('BREVO') || k.includes('API'))
+          }
+        },
+        { status: 500 }
+      );
+    }
 
-    // Build email template
-    const { subject, html } = buildEmail({
-      type,
-      action,
-      amount,
-      payerName,
-      groupName,
-      description,
-    });
+    // Validate API key format
+    if (!process.env.BREVO_API_KEY.startsWith('xkeysib-')) {
+      console.error("Invalid Brevo API key format");
+      return NextResponse.json(
+        { 
+          success: false, 
+          message: "Invalid API key format",
+          debug: { 
+            keyStartsWith: process.env.BREVO_API_KEY.substring(0, 10),
+            expectedStart: "xkeysib-"
+          }
+        },
+        { status: 500 }
+      );
+    }
 
-    // Send in batches
-    const batches = [];
-    for (let i = 0; i < recipients.length; i += BATCH_SIZE) {
-      const batchRecipients = recipients.slice(i, i + BATCH_SIZE);
-      batches.push(batchRecipients);
-    }
+    console.log(`📧 Preparing to send ${type} email to ${recipients.length} recipients`);
 
-    console.log(`📦 Sending in ${batches.length} batches`);
+    // Build email template
+    const { subject, html } = buildEmail({
+      type,
+      action,
+      amount,
+      payerName,
+      groupName,
+      description,
+    });
 
-    const results = await Promise.allSettled(
-      batches.map((batch, index) => 
-        sendEmailBatch(batch, subject, html, type, action, index)
-      )
-    );
+    console.log("Email subject:", subject);
+    console.log("HTML length:", html.length);
 
-    // Process results
-    const successfulBatches: string[] = [];
-    const failedBatches: Array<{batch: number, error: string}> = [];
-    let totalSent = 0;
+    // Send test email to first recipient
+    const testRecipient = recipients[0];
+    console.log("Test recipient:", testRecipient);
 
-    results.forEach((result, index) => {
-      if (result.status === 'fulfilled') {
-        successfulBatches.push(result.value.messageId);
-        totalSent += result.value.sentCount;
-      } else {
-        failedBatches.push({
-          batch: index + 1,
-          error: result.reason.message || 'Unknown error'
-        });
-        console.error(`Batch ${index + 1} failed:`, result.reason);
-      }
-    });
+    try {
+      const testResult = await sendSingleEmail({
+        recipient: testRecipient,
+        subject,
+        html,
+        type,
+        action,
+        batchIndex: 0
+      });
 
-    const responseData = {
-      success: failedBatches.length === 0,
-      totalRecipients: recipients.length,
-      totalSent,
-      batches: {
-        total: batches.length,
-        successful: successfulBatches.length,
-        failed: failedBatches.length,
-        failedDetails: failedBatches.length > 0 ? failedBatches : undefined
-      },
-      messageIds: successfulBatches,
-    };
+      console.log("✅ Test email sent successfully:", testResult.messageId);
 
-    if (failedBatches.length > 0) {
-      console.warn(`⚠️ ${failedBatches.length} batch(es) failed`, failedBatches);
-      return NextResponse.json(responseData, { status: 207 }); // Multi-status
-    }
+      // Send to remaining recipients if test succeeded
+      const remainingRecipients = recipients.slice(1);
+      if (remainingRecipients.length > 0) {
+        // Send in batches
+        const batches = [];
+        for (let i = 0; i < remainingRecipients.length; i += BATCH_SIZE) {
+          const batchRecipients = remainingRecipients.slice(i, i + BATCH_SIZE);
+          batches.push(batchRecipients);
+        }
 
-    console.log(`✅ All ${batches.length} batches sent successfully`);
-    return NextResponse.json(responseData);
+        console.log(`📦 Sending remaining ${remainingRecipients.length} emails in ${batches.length} batches`);
 
-  } catch (error: any) {
-    console.error("Unexpected error:", error);
-    return NextResponse.json(
-      { success: false, message: error.message || "Internal error" },
-      { status: 500 }
-    );
-  }
+        const results = await Promise.allSettled(
+          batches.map((batch, index) => 
+            sendEmailBatch(batch, subject, html, type, action, index + 1)
+          )
+        );
+
+        // Process results
+        const successfulBatches: string[] = [testResult.messageId];
+        const failedBatches: Array<{batch: number, error: string}> = [];
+        let totalSent = 1; // Count test email
+
+        results.forEach((result, index) => {
+          if (result.status === 'fulfilled') {
+            successfulBatches.push(result.value.messageId);
+            totalSent += result.value.sentCount;
+          } else {
+            failedBatches.push({
+              batch: index + 1,
+              error: result.reason.message || 'Unknown error'
+            });
+            console.error(`Batch ${index + 1} failed:`, result.reason);
+          }
+        });
+
+        const responseData = {
+          success: failedBatches.length === 0,
+          totalRecipients: recipients.length,
+          totalSent,
+          batches: {
+            total: batches.length + 1, // +1 for test email
+            successful: successfulBatches.length,
+            failed: failedBatches.length,
+            failedDetails: failedBatches.length > 0 ? failedBatches : undefined
+          },
+          messageIds: successfulBatches,
+        };
+
+        if (failedBatches.length > 0) {
+          console.warn(`⚠️ ${failedBatches.length} batch(es) failed`, failedBatches);
+          return NextResponse.json(responseData, { status: 207 });
+        }
+
+        console.log(`✅ All emails sent successfully (${totalSent}/${recipients.length})`);
+        return NextResponse.json(responseData);
+      }
+
+      // If only test recipient
+      return NextResponse.json({
+        success: true,
+        totalRecipients: 1,
+        totalSent: 1,
+        messageId: testResult.messageId,
+        message: "Test email sent successfully"
+      });
+
+    } catch (emailError: any) {
+      console.error("❌ Email sending failed:", emailError);
+      
+      // Check for specific Brevo errors
+      if (emailError.message?.includes('unauthorized') || 
+          emailError.message?.includes('Invalid api key')) {
+        return NextResponse.json(
+          { 
+            success: false, 
+            message: "Invalid Brevo API key",
+            debug: { 
+              error: emailError.message,
+              apiKeyExists: !!process.env.BREVO_API_KEY
+            }
+          },
+          { status: 401 }
+        );
+      }
+      
+      if (emailError.message?.includes('sender not verified')) {
+        return NextResponse.json(
+          { 
+            success: false, 
+            message: "Sender email not verified in Brevo",
+            debug: { error: emailError.message }
+          },
+          { status: 400 }
+        );
+      }
+
+      throw emailError;
+    }
+
+  } catch (error: any) {
+    console.error("❌ Unexpected error in notify API:", error);
+    console.error("Error stack:", error.stack);
+    
+    return NextResponse.json(
+      { 
+        success: false, 
+        message: error.message || "Internal error",
+        debug: {
+          errorType: error.constructor.name,
+          nodeVersion: process.version,
+          timestamp: new Date().toISOString()
+        }
+      },
+      { status: 500 }
+    );
+  }
 }
 
 /**
- * Send a single batch of emails
- */
-async function sendEmailBatch(
-  recipients: Recipient[], 
-  subject: string, 
-  html: string, 
-  type: string, 
-  action: string,
-  batchIndex: number
-) {
-  const payload = {
-    sender: {
-      name: "TravelSplit",
-      email: "tripsplit8@gmail.com",
-    },
-    to: recipients.map((r: Recipient) => ({
-      email: r.email,
-      name: r.name || undefined,
-    })),
-    subject,
-    htmlContent: html,
-    tags: ["travelsplit", type.toLowerCase(), action.toLowerCase(), `batch_${batchIndex + 1}`],
-    replyTo: {
-      email: "tripsplit8@gmail.com",
-      name: "TravelSplit Support"
-    }
-  };
-
-  const response = await fetch("https://api.brevo.com/v3/smtp/email", {
-    method: "POST",
-    headers: {
-      "accept": "application/json",
-      "content-type": "application/json",
-      "api-key": process.env.BREVO_API_KEY!,
-    },
-    body: JSON.stringify(payload),
-  });
-
-  const data = await response.json();
-
-  if (!response.ok) {
-    throw new Error(data.message || `HTTP ${response.status}`);
-  }
-
-  console.log(`✅ Batch ${batchIndex + 1} sent: ${data.messageId}`);
-  return {
-    messageId: data.messageId,
-    sentCount: recipients.length
-  };
-}
-
-/**
- * Reusable email templates
- */
-/**
- * Build beautiful HTML emails
+ * Send a single email for testing
  */
+async function sendSingleEmail({
+  recipient,
+  subject,
+  html,
+  type,
+  action,
+  batchIndex
+}: {
+  recipient: Recipient,
+  subject: string,
+  html: string,
+  type: string,
+  action: string,
+  batchIndex: number
+}) {
+  console.log(`Sending test email to ${recipient.email}...`);
+  
+  const payload = {
+    sender: {
+      name: "TravelSplit",
+      email: "tripsplit8@gmail.com",
+    },
+    to: [{
+      email: recipient.email,
+      name: recipient.name || undefined,
+    }],
+    subject,
+    htmlContent: html, // ACTUAL HTML CONTENT
+    tags: ["travelsplit", type.toLowerCase(), action.toLowerCase(), `test_batch_${batchIndex}`],
+    replyTo: {
+      email: "tripsplit8@gmail.com",
+      name: "TravelSplit Support"
+    }
+  };
+
+  // Log truncated payload for debugging
+  console.log("Brevo API payload (truncated):", {
+    ...payload,
+    htmlContent: html.length > 100 ? html.substring(0, 100) + '...' : html
+  });
+
+  const response = await fetch("https://api.brevo.com/v3/smtp/email", {
+    method: "POST",
+    headers: {
+      "accept": "application/json",
+      "content-type": "application/json",
+      "api-key": process.env.BREVO_API_KEY!,
+    },
+    body: JSON.stringify(payload), // NO REPLACER FUNCTION HERE
+  });
+
+  console.log("Brevo API response status:", response.status);
+  
+  const responseText = await response.text();
+  console.log("Brevo API response text:", responseText);
+
+  let data;
+  try {
+    data = JSON.parse(responseText);
+  } catch (e) {
+    console.error("Failed to parse Brevo response as JSON:", responseText);
+    throw new Error(`Invalid response from Brevo: ${responseText.substring(0, 200)}`);
+  }
+
+  if (!response.ok) {
+    console.error("Brevo API error:", data);
+    throw new Error(data.message || `HTTP ${response.status}: ${JSON.stringify(data)}`);
+  }
+
+  console.log("✅ Test email API call successful:", data.messageId);
+  return {
+    messageId: data.messageId,
+    sentCount: 1
+  };
+}
+
+/**
+ * Send a batch of emails
+ */
+async function sendEmailBatch(
+  recipients: Recipient[], 
+  subject: string, 
+  html: string, // ACTUAL HTML
+  type: string, 
+  action: string,
+  batchIndex: number
+) {
+  const payload = {
+    sender: {
+      name: "TravelSplit",
+      email: "tripsplit8@gmail.com",
+    },
+    to: recipients.map((r: Recipient) => ({
+      email: r.email,
+      name: r.name || undefined,
+    })),
+    subject,
+    htmlContent: html, // ACTUAL HTML
+    tags: ["travelsplit", type.toLowerCase(), action.toLowerCase(), `batch_${batchIndex}`],
+    replyTo: {
+      email: "tripsplit8@gmail.com",
+      name: "TravelSplit Support"
+    }
+  };
+
+  const response = await fetch("https://api.brevo.com/v3/smtp/email", {
+    method: "POST",
+    headers: {
+      "accept": "application/json",
+      "content-type": "application/json",
+      "api-key": process.env.BREVO_API_KEY!,
+    },
+    body: JSON.stringify(payload), // NO REPLACER
+  });
+
+  const data = await response.json();
+
+  if (!response.ok) {
+    throw new Error(data.message || `HTTP ${response.status}`);
+  }
+
+  console.log(`✅ Batch ${batchIndex} sent: ${data.messageId}`);
+  return {
+    messageId: data.messageId,
+    sentCount: recipients.length
+  };
+}
 function buildEmail({ type, action, amount, payerName, groupName, description, category = "Other" }: any) {
   let subject = "";
   let html = "";
@@ -899,302 +1083,4 @@ function buildEmail({ type, action, amount, payerName, groupName, description, c
   }
 
   return { subject, html };
-}
-
-function getExpenseTemplate({ action, amountStr, payerName, groupName, description }: any) {
-  const verb = action === "ADDED" ? "added" : 
-               action === "EDITED" ? "updated" : "deleted";
-  
-  const subject = `Expense ${verb} in ${groupName}`;
-  
-  const html = getBaseTemplate({
-    title: `Expense ${verb}`,
-    headerColor: "linear-gradient(135deg, #00A896 0%, #14b8a6 100%)",
-    tagline: "Split smarter, travel together",
-    message: `
-      <strong style="color: #00A896;">${payerName}</strong> ${verb} 
-      the expense "<strong>${description}</strong>"
-      in <strong>${groupName}</strong>.
-    `,
-    amount: amountStr,
-    amountLabel: "Total Amount",
-    buttonText: "👉 Open TravelSplit",
-    buttonSubtext: "Track expenses, settle up, and manage your trip"
-  });
-
-  return { subject, html };
-}
-
-function getSettlementTemplate({ action, amountStr, payerName, groupName }: any) {
-  const verb = action === "ADDED" ? "added" : 
-               action === "EDITED" ? "updated" : "deleted";
-  
-  const subject = `Payment ${verb} in ${groupName}`;
-  
-  const html = getBaseTemplate({
-    title: `Payment ${verb}`,
-    headerColor: "linear-gradient(135deg, #00A896 0%, #14b8a6 100%)",
-    tagline: "Split smarter, travel together",
-    message: `
-      <strong style="color: #00A896;">${payerName}</strong> ${verb} 
-      a payment of <strong>${amountStr}</strong>
-      in <strong>${groupName}</strong>.
-    `,
-    amount: amountStr,
-    amountLabel: "Payment Amount",
-    buttonText: "👉 Open TravelSplit",
-    buttonSubtext: "Track expenses, settle up, and manage your trip"
-  });
-
-  return { subject, html };
-}
-
-function getGroupTemplate({ action, groupName }: any) {
-  const templates: Record<string, () => { subject: string; html: string }> = {
-    MEMBER_REMOVED: () => ({
-      subject: `You've been removed from ${groupName}`,
-      html: getBaseTemplate({
-        title: "Removed from Group",
-        headerColor: "linear-gradient(135deg, #ef4444 0%, #dc2626 100%)",
-        tagline: "Group Update",
-        message: `You have been removed from <strong>${groupName}</strong>.`,
-        customContent: `
-          <div class="highlight">
-            <p style="margin: 0; color: #4a5568;">
-              Your past expenses and activity in this group remain preserved in the history.
-            </p>
-          </div>
-        `,
-        buttonText: "View Your Trips",
-        hideAmount: true
-      })
-    }),
-    
-    OWNERSHIP_TRANSFERRED: () => ({
-      subject: `You're now the Admin of ${groupName}`,
-      html: getBaseTemplate({
-        title: "🎉 You are now Admin!",
-        headerColor: "linear-gradient(135deg, #f59e0b 0%, #d97706 100%)",
-        tagline: "New Admin Role",
-        message: `The previous creator left <strong>${groupName}</strong>.`,
-        customContent: `
-          <div class="highlight">
-            <p style="margin: 0; color: #4a5568; font-size: 17px;">
-              <strong>You are now the new Admin</strong> of this trip. You have full control to manage members, expenses, and settings.
-            </p>
-          </div>
-        `,
-        buttonText: "Manage Group",
-        hideAmount: true
-      })
-    }),
-    
-    DELETED: () => ({
-      subject: `Trip Deleted: ${groupName}`,
-      html: getBaseTemplate({
-        title: "Trip Deleted",
-        headerColor: "linear-gradient(135deg, #6b7280 0%, #4b5563 100%)",
-        tagline: "Trip Closed",
-        message: `The admin has permanently deleted <strong>${groupName}</strong>.`,
-        customContent: `
-          <div class="highlight">
-            <p style="margin: 0; color: #4a5568;">
-              Since all balances were settled, this trip and its history have been removed from the system.
-            </p>
-          </div>
-        `,
-        buttonText: "Create New Trip",
-        hideAmount: true
-      })
-    })
-  };
-
-  const templateFn = templates[action];
-  if (!templateFn) {
-    throw new Error(`Unknown group action: ${action}`);
-  }
-
-  return templateFn();
-}
-
-interface TemplateOptions {
-  title: string;
-  headerColor: string;
-  tagline: string;
-  message: string;
-  amount?: string;
-  amountLabel?: string;
-  customContent?: string;
-  buttonText: string;
-  buttonSubtext?: string;
-  hideAmount?: boolean;
-}
-
-function getBaseTemplate(options: TemplateOptions): string {
-  return `
-    <!DOCTYPE html>
-    <html>
-    <head>
-      <meta charset="utf-8">
-      <meta name="viewport" content="width=device-width, initial-scale=1.0">
-      <style>
-        body {
-          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-          line-height: 1.6;
-          color: #333;
-          max-width: 600px;
-          margin: 0 auto;
-          background: #f8f9fa;
-          -webkit-font-smoothing: antialiased;
-        }
-        .container {
-          background: white;
-          border-radius: 12px;
-          overflow: hidden;
-          box-shadow: 0 4px 12px rgba(0,0,0,0.05);
-          margin: 20px;
-        }
-        .header {
-          background: ${options.headerColor};
-          color: white;
-          padding: 32px 24px;
-          text-align: center;
-        }
-        .logo {
-          font-size: 28px;
-          font-weight: bold;
-          margin: 0 0 8px 0;
-        }
-        .tagline {
-          opacity: 0.9;
-          margin: 0;
-          font-size: 14px;
-        }
-        .content {
-          padding: 32px 24px;
-        }
-        .title {
-          color: #1a1a1a;
-          margin-top: 0;
-          font-size: 24px;
-          text-align: center;
-        }
-        .message {
-          color: #4a5568;
-          font-size: 16px;
-          line-height: 1.7;
-          text-align: center;
-        }
-        .highlight {
-          background: #f7fafc;
-          border-left: 4px solid #00A896;
-          padding: 20px;
-          border-radius: 8px;
-          margin: 24px 0;
-        }
-        .amount {
-          font-size: 40px;
-          font-weight: 800;
-          color: #00A896;
-          text-align: center;
-          margin: 16px 0;
-          letter-spacing: -1px;
-        }
-        .amount-label {
-          text-align: center;
-          color: #4a5568;
-          margin: 0 0 24px 0;
-          font-size: 14px;
-        }
-        .button {
-          display: inline-block;
-          background: #00A896;
-          color: white;
-          padding: 16px 32px;
-          text-decoration: none;
-          border-radius: 10px;
-          font-weight: 600;
-          font-size: 16px;
-          margin: 8px 0;
-          transition: all 0.2s;
-          text-align: center;
-        }
-        .button:hover {
-          background: #0d9488;
-          transform: translateY(-1px);
-          box-shadow: 0 6px 20px rgba(0,168,150,0.2);
-        }
-        .footer {
-          padding: 24px;
-          background: #f8f9fa;
-          text-align: center;
-          color: #718096;
-          font-size: 13px;
-          border-top: 1px solid #e2e8f0;
-        }
-        .divider {
-          height: 1px;
-          background: #e2e8f0;
-          margin: 24px 0;
-        }
-        @media (max-width: 480px) {
-          .container {
-            margin: 10px;
-          }
-          .header, .content {
-            padding: 24px 16px;
-          }
-          .amount {
-            font-size: 32px;
-          }
-        }
-      </style>
-    </head>
-    <body>
-      <div class="container">
-        <div class="header">
-          <div class="logo">TravelSplit</div>
-          <p class="tagline">${options.tagline}</p>
-        </div>
-        
-        <div class="content">
-          <h2 class="title">${options.title}</h2>
-          
-          <p class="message">${options.message}</p>
-          
-          ${options.customContent || ''}
-          
-          ${!options.hideAmount && options.amount ? `
-            <div class="highlight">
-              <div class="amount">${options.amount}</div>
-              ${options.amountLabel ? `<p class="amount-label">${options.amountLabel}</p>` : ''}
-            </div>
-          ` : ''}
-          
-          <div style="text-align: center; margin: 32px 0;">
-            <a href="https://travel-split-8.vercel.app" class="button" target="_blank">
-              ${options.buttonText}
-            </a>
-            ${options.buttonSubtext ? `
-              <p style="color: #718096; font-size: 14px; margin-top: 12px;">
-                ${options.buttonSubtext}
-              </p>
-            ` : ''}
-          </div>
-          
-          <div class="divider"></div>
-          
-          <p style="color: #718096; font-size: 14px; text-align: center;">
-            Need help? Reply to this email or visit our help center.
-          </p>
-        </div>
-        
-        <div class="footer">
-          <p>This is an automated notification from TravelSplit.</p>
-          <p>© ${new Date().getFullYear()} TravelSplit. All rights reserved.</p>
-        </div>
-      </div>
-    </body>
-    </html>
-  `;
 }
