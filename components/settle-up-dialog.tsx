@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useState, useRef } from "react"
 import {
   Dialog,
   DialogContent,
@@ -46,7 +46,7 @@ export function SettleUpDialog({
 }: SettleUpDialogProps) {
   const [loading, setLoading] = useState(false)
   const [submitting, setSubmitting] = useState(false)
-  const [members, setMembers] = useState<{ id: string; full_name: string }[]>([])
+  const [members, setMembers] = useState<{ id: string; full_name: string; email?: string }[]>([])
   const [dataReady, setDataReady] = useState(false)
 
   const [payTo, setPayTo] = useState("")
@@ -54,50 +54,69 @@ export function SettleUpDialog({
   const [paymentMode, setPaymentMode] = useState("UPI")
   
   const [editingSplitId, setEditingSplitId] = useState<string | null>(null)
+  const isMounted = useRef(true)
 
   useEffect(() => {
+    isMounted.current = true
+    
     if (open && activeGroup) {
       setDataReady(false)
       fetchMembersAndSetData()
-    } else {
-      if (!open) {
-        // Reset form when dialog closes
-        setTimeout(() => {
+    } else if (!open) {
+      // Reset form when dialog closes
+      setTimeout(() => {
+        if (isMounted.current) {
           setPaymentMode("UPI")
           setAmount("")
           setPayTo("")
           setEditingSplitId(null)
           setDataReady(false)
-        }, 300) // Wait for dialog close animation
-      }
+          setSubmitting(false)
+        }
+      }, 300) // Wait for dialog close animation
+    }
+
+    return () => {
+      isMounted.current = false
     }
   }, [open, activeGroup, paymentToEdit])
 
   async function fetchMembersAndSetData() {
-    if (!activeGroup) return
+    if (!activeGroup || !isMounted.current) return
     setLoading(true)
 
     try {
       const { data: { user } } = await supabase.auth.getUser()
 
-      // Fetch Members
+      // Fetch Members with email
       const { data } = await supabase
         .from("group_members")
-        .select("user_id, profiles(id, full_name)")
+        .select("user_id, profiles(id, full_name, email)")
         .eq("group_id", activeGroup.id)
 
       const valid = (data || []).map((m: any) => {
         const p = Array.isArray(m.profiles) ? m.profiles[0] : m.profiles
-        return p?.full_name ? p : { id: m.user_id, full_name: "Unknown User" }
+        return p?.full_name ? { 
+          id: m.user_id, 
+          full_name: p.full_name, 
+          email: p.email 
+        } : { 
+          id: m.user_id, 
+          full_name: "Unknown User" 
+        }
       })
 
       const others = valid.filter((m: any) => m.id !== user?.id)
-      setMembers(others)
+      if (isMounted.current) {
+        setMembers(others)
+      }
 
       // If Editing, Fetch & Fill Data
       if (paymentToEdit) {
-        setAmount(paymentToEdit.amount.toString())
-        setPaymentMode(paymentToEdit.payment_mode || "UPI")
+        if (isMounted.current) {
+          setAmount(paymentToEdit.amount.toString())
+          setPaymentMode(paymentToEdit.payment_mode || "UPI")
+        }
 
         const { data: splitData } = await supabase
           .from('expense_splits')
@@ -105,11 +124,11 @@ export function SettleUpDialog({
           .eq('expense_id', paymentToEdit.id)
           .single()
 
-        if (splitData) {
+        if (splitData && isMounted.current) {
           setPayTo(splitData.user_id)
           setEditingSplitId(splitData.id)
         }
-      } else {
+      } else if (isMounted.current) {
         setAmount("")
         setPayTo("")
         setPaymentMode("UPI")
@@ -118,19 +137,85 @@ export function SettleUpDialog({
 
       // Small delay to show skeleton (feels more intentional)
       await new Promise(resolve => setTimeout(resolve, 300))
-      setDataReady(true)
+      if (isMounted.current) {
+        setDataReady(true)
+      }
 
     } catch (err) {
       console.error("Failed to load data", err)
       toast.error("Failed to load details")
-      setDataReady(true) // Show form even on error
+      if (isMounted.current) {
+        setDataReady(true) // Show form even on error
+      }
     } finally {
-      setLoading(false)
+      if (isMounted.current) {
+        setLoading(false)
+      }
+    }
+  }
+
+  // Send email notification with proper await for reliability
+  const sendEmailNotification = async (
+    recipientEmail: string,
+    recipientName: string,
+    amount: number,
+    payerName: string,
+    groupName: string
+  ): Promise<boolean> => {
+    try {
+      const controller = new AbortController()
+      const timeoutId = setTimeout(() => controller.abort(), 10000) // 10 second timeout
+      
+      const response = await fetch('/api/notify', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          type: 'SETTLEMENT',
+          action: paymentToEdit ? 'EDITED' : 'ADDED',
+          amount: amount,
+          payerName: payerName,
+          groupName: groupName,
+          description: "Payment settlement",
+          recipients: [{ 
+            email: recipientEmail, 
+            name: recipientName 
+          }]
+        }),
+        signal: controller.signal
+      })
+
+      clearTimeout(timeoutId)
+
+      if (!isMounted.current) {
+        console.log('Component unmounted during email send')
+        return false
+      }
+
+      if (!response.ok) {
+        const errorText = await response.text()
+        console.error("Email notification failed:", {
+          status: response.status,
+          error: errorText
+        })
+        return false
+      }
+
+      const result = await response.json()
+      return result.success === true
+    } catch (err: any) {
+      if (err.name === 'AbortError') {
+        console.error('Email send timeout after 10 seconds')
+      } else {
+        console.error("Email notification error:", err)
+      }
+      return false
     }
   }
 
   async function handleSave() {
-    if (!payTo || !amount || !activeGroup) {
+    if (!payTo || !amount || !activeGroup || !isMounted.current) {
       toast.error("Please fill all fields")
       return
     }
@@ -178,8 +263,6 @@ export function SettleUpDialog({
 
           if (splitError) throw splitError
         }
-
-        toast.success("Payment updated!")
       } 
       // === CREATE MODE ===
       else {
@@ -211,8 +294,6 @@ export function SettleUpDialog({
           })
 
         if (splitError) throw splitError
-
-        toast.success("Settlement recorded!")
       }
 
       // ====================================================
@@ -221,38 +302,32 @@ export function SettleUpDialog({
       let emailSuccess = false
       
       try {
-        const { data: recipient } = await supabase
-          .from('profiles')
-          .select('email, full_name')
-          .eq('id', payTo)
-          .single()
-
-        if (recipient?.email) {
-          // Use await to ensure email is sent before closing dialog
-          const response = await fetch('/api/notify', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-              type: 'SETTLEMENT',
-              action: paymentToEdit ? 'EDITED' : 'ADDED',
-              amount: numAmount,
-              payerName: user.user_metadata?.full_name || "A friend",
-              groupName: activeGroup?.name || "Trip",
-              recipients: [{ 
-                email: recipient.email, 
-                name: recipient.full_name 
-              }]
-            })
-          });
-
-          if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`)
+        // Get recipient details
+        const recipient = members.find(m => m.id === payTo)
+        
+        if (recipient?.email && recipient.email.includes('@')) {
+          // Get payer name
+          let payerName = user.user_metadata?.full_name || "A friend"
+          
+          // Try to get actual profile data
+          const { data: profile } = await supabase
+            .from('profiles')
+            .select('full_name')
+            .eq('id', user.id)
+            .single()
+            
+          if (profile?.full_name) {
+            payerName = profile.full_name
           }
 
-          const result = await response.json()
-          emailSuccess = result.success
+          // Send email notification (with await for reliability)
+          emailSuccess = await sendEmailNotification(
+            recipient.email,
+            recipient.full_name,
+            numAmount,
+            payerName,
+            activeGroup.name || "Trip"
+          )
         }
       } catch (emailError: any) { 
         console.error("Email notification failed:", emailError)
@@ -285,20 +360,24 @@ export function SettleUpDialog({
         )
       }
 
-      // Wait a moment before closing for better UX
-      await new Promise(resolve => setTimeout(resolve, 500))
-
       // Trigger parent callback
       onSettled()
       
+      // Wait a moment before closing for better UX
+      await new Promise(resolve => setTimeout(resolve, 500))
+
       // Close dialog after parent callback
-      onOpenChange(false)
+      if (isMounted.current) {
+        onOpenChange(false)
+      }
 
     } catch (e: any) {
       console.error("Save Error:", e)
       toast.error(e.message || "Failed to save settlement")
     } finally {
-      setSubmitting(false)
+      if (isMounted.current) {
+        setSubmitting(false)
+      }
     }
   }
   
@@ -425,6 +504,8 @@ export function SettleUpDialog({
                     onChange={e => setAmount(e.target.value)}
                     className="h-14 pl-10 rounded-xl bg-white/[0.04] border-white/10 text-white text-xl font-semibold focus-visible:ring-[#00A896] focus-visible:ring-offset-0 transition-all placeholder:text-zinc-600"
                     placeholder="0"
+                    min="0"
+                    step="0.01"
                   />
                 </div>
               </div>

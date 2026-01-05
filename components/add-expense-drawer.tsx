@@ -14,7 +14,7 @@ import {
   Check, Wallet, Smartphone, CreditCard, X
 } from "lucide-react"
 import { toast } from "sonner"
-import { trackEvent } from "@/lib/analytics"
+
 import { cn } from "@/lib/utils"
 import { motion, AnimatePresence } from "framer-motion"
 
@@ -91,10 +91,18 @@ export function AddExpenseDrawer({
   const [splitWith, setSplitWith] = useState<string[]>([])
   const [loading, setLoading] = useState(false)
   const [submitting, setSubmitting] = useState(false)
+  const [sendingEmails, setSendingEmails] = useState(false)
 
   const targetGroupId = activeGroup?.id || manualGroupId
   const isEditing = !!expenseToEdit
   const inputRef = useRef<HTMLInputElement>(null)
+  const isMounted = useRef(true)
+
+  // Helper function to validate email
+  const isValidEmail = useCallback((email: string): boolean => {
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+    return emailRegex.test(email) && email.length <= 254
+  }, [])
 
   // Prevent bg scroll
   useEffect(() => {
@@ -104,31 +112,43 @@ export function AddExpenseDrawer({
     }
   }, [open])
 
+  // Handle component mount/unmount
+  useEffect(() => {
+    isMounted.current = true
+    return () => {
+      isMounted.current = false
+    }
+  }, [])
+
   // Initialize component
   useEffect(() => {
     if (!open) {
       // Reset form after dialog closes (with delay for animation)
       const timer = setTimeout(() => {
-        if (!open) {
+        if (!open && isMounted.current) {
           setCurrentStep(0)
           setAmount("")
           setCategory("Food")
           setDescription("")
           setPaymentMethod("UPI")
           setSplitWith([])
+          setSendingEmails(false)
         }
       }, 300)
       return () => clearTimeout(timer)
     }
 
-    setCurrentStep(0)
-    setSubmitting(false)
+    if (isMounted.current) {
+      setCurrentStep(0)
+      setSubmitting(false)
+      setSendingEmails(false)
+    }
 
     const init = async () => {
       if (!activeGroup) await fetchUserGroups()
-      else setManualGroupId("")
+      else if (isMounted.current) setManualGroupId("")
 
-      if (expenseToEdit) {
+      if (expenseToEdit && isMounted.current) {
         setAmount(expenseToEdit.amount.toString())
         setCategory(expenseToEdit.category || "Food")
         setDescription(expenseToEdit.description)
@@ -142,7 +162,9 @@ export function AddExpenseDrawer({
     
     // Focus input after a small delay for better UX
     const focusTimer = setTimeout(() => {
-      if (open) inputRef.current?.focus()
+      if (open && inputRef.current && isMounted.current) {
+        inputRef.current.focus()
+      }
     }, 150)
     
     return () => clearTimeout(focusTimer)
@@ -171,10 +193,12 @@ export function AddExpenseDrawer({
       })
       .filter(Boolean)
 
-    setAvailableGroups(groups)
+    if (isMounted.current) {
+      setAvailableGroups(groups)
 
-    if (groups.length && !activeGroup) {
-      setManualGroupId(groups[0].id)
+      if (groups.length && !activeGroup) {
+        setManualGroupId(groups[0].id)
+      }
     }
   }, [activeGroup])
 
@@ -191,7 +215,7 @@ export function AddExpenseDrawer({
       return
     }
 
-    if (data) {
+    if (data && isMounted.current) {
       setSplitWith(data.map(s => s.user_id))
     }
   }
@@ -202,6 +226,7 @@ export function AddExpenseDrawer({
   }, [targetGroupId])
 
   const fetchMembers = async (groupId: string) => {
+    if (!isMounted.current) return
     setLoading(true)
 
     try {
@@ -235,21 +260,25 @@ export function AddExpenseDrawer({
         mapped.push({ id: user.id, full_name: "You" })
       }
 
-      setMembers(mapped)
+      if (isMounted.current) {
+        setMembers(mapped)
 
-      // Initialize form fields
-      if (!expenseToEdit) {
-        if (user && !paidBy) setPaidBy(user.id)
-        else if (mapped.length > 0 && !paidBy) setPaidBy(mapped[0].id)
+        // Initialize form fields
+        if (!expenseToEdit) {
+          if (user && !paidBy) setPaidBy(user.id)
+          else if (mapped.length > 0 && !paidBy) setPaidBy(mapped[0].id)
 
-        // Auto-select all members by default
-        setSplitWith(mapped.map(m => m.id))
+          // Auto-select all members by default
+          setSplitWith(mapped.map(m => m.id))
+        }
       }
     } catch (error) {
       console.error("Failed to fetch members:", error)
       toast.error("Could not load group members")
     } finally {
-      setLoading(false)
+      if (isMounted.current) {
+        setLoading(false)
+      }
     }
   }
 
@@ -349,7 +378,7 @@ export function AddExpenseDrawer({
     }
   }, [description, category, onAnalysisComplete])
 
-  // Send email notifications
+  // Send email notifications (await for reliability)
   const sendEmailNotifications = async (
     recipients: Recipient[],
     numAmount: number,
@@ -358,7 +387,19 @@ export function AddExpenseDrawer({
   ): Promise<boolean> => {
     if (recipients.length === 0) return false
 
+    // Safety: Limit recipients to prevent API abuse
+    const maxRecipients = 100
+    const safeRecipients = recipients.slice(0, maxRecipients)
+    
+    if (recipients.length > maxRecipients) {
+      console.warn(`Too many recipients (${recipients.length}), limiting to ${maxRecipients}`)
+    }
+
     try {
+      // CRITICAL: We await this to ensure Vercel/Browser doesn't kill the request
+      const controller = new AbortController()
+      const timeoutId = setTimeout(() => controller.abort(), 10000) // 10 second timeout
+      
       const res = await fetch('/api/notify', {
         method: 'POST',
         headers: {
@@ -371,24 +412,37 @@ export function AddExpenseDrawer({
           payerName,
           groupName,
           description,
-          recipients
-        })
+          recipients: safeRecipients
+        }),
+        signal: controller.signal
       })
 
+      clearTimeout(timeoutId)
+
+      if (!isMounted.current) {
+        console.log('Component unmounted during email send')
+        return false
+      }
+
       if (!res.ok) {
-        const errorText = await res.text()
+        const errorData = await res.json().catch(() => ({}))
         console.error("Email notification failed:", {
           status: res.status,
-          statusText: res.statusText,
-          error: errorText
+          error: errorData.message || 'Unknown error'
         })
         return false
       }
 
       const result = await res.json()
-      return result.success === true
-    } catch (err) {
-      console.error("Notify error:", err)
+      console.log("Email notification sent successfully")
+      return true
+
+    } catch (err: any) {
+      console.error("Notify setup error:", err)
+      
+      if (err.name === 'AbortError') {
+        console.error('Email send timeout after 10 seconds')
+      }
       return false
     }
   }
@@ -420,6 +474,8 @@ export function AddExpenseDrawer({
       return
     }
 
+    if (!isMounted.current) return
+    
     setSubmitting(true)
 
     try {
@@ -477,20 +533,50 @@ export function AddExpenseDrawer({
       if (splitError) throw splitError
 
       // Success feedback
-      trackEvent.expenseAdded(numAmount, category, splitWith.length)
       onExpenseAdded?.(true)
 
-      // Email notifications
+      // Email notifications (get payer name first)
       let emailSent = false
+      let payerName = "A friend"
+      let groupName = "Trip"
+      
       try {
         const { data: { user } } = await supabase.auth.getUser()
-        const payerName = user?.user_metadata?.full_name || "A friend"
-        const groupName = activeGroup?.name || 
-                         availableGroups.find(g => g.id === targetGroupId)?.name || 
-                         "Trip"
+        
+        // Get payer's display name
+        payerName = user?.user_metadata?.full_name || "A friend"
+        if (user) {
+          // Try to get actual profile data
+          const { data: profile } = await supabase
+            .from('profiles')
+            .select('full_name')
+            .eq('id', user.id)
+            .single()
+            
+          if (profile?.full_name) {
+            payerName = profile.full_name
+          }
+        }
+        
+        // Get group name
+        groupName = activeGroup?.name || 
+                   availableGroups.find(g => g.id === targetGroupId)?.name || 
+                   "Trip"
 
+        // Filter recipients carefully
         const recipients: Recipient[] = members
-          .filter(m => splitWith.includes(m.id) && m.id !== user?.id && m.email)
+          .filter(m => {
+            // Must be in split
+            if (!splitWith.includes(m.id)) return false
+            
+            // Not the payer
+            if (m.id === user?.id) return false
+            
+            // Must have valid email
+            if (!m.email || !isValidEmail(m.email)) return false
+            
+            return true
+          })
           .map(m => ({
             email: m.email!,
             name: m.full_name,
@@ -498,10 +584,15 @@ export function AddExpenseDrawer({
           }))
 
         if (recipients.length > 0) {
+          setSendingEmails(true)
           emailSent = await sendEmailNotifications(recipients, numAmount, payerName, groupName)
         }
-      } catch (emailErr) {
+      } catch (emailErr: any) {
         console.error("Email preparation error:", emailErr)
+      } finally {
+        if (isMounted.current) {
+          setSendingEmails(false)
+        }
       }
 
       // Show appropriate success message
@@ -515,16 +606,21 @@ export function AddExpenseDrawer({
       checkAndSaveAlerts(targetGroupId, numAmount, category)
 
       // Small delay for better UX before closing
-      await new Promise(resolve => setTimeout(resolve, 500))
+      await new Promise(resolve => setTimeout(resolve, 800))
 
       // Close dialog
-      onOpenChange(false)
+      if (isMounted.current) {
+        onOpenChange(false)
+      }
 
     } catch (error: any) {
       console.error("Save error:", error)
       toast.error(error.message || "Failed to save expense")
     } finally {
-      setSubmitting(false)
+      if (isMounted.current) {
+        setSubmitting(false)
+        setSendingEmails(false)
+      }
     }
   }
 
@@ -538,21 +634,27 @@ export function AddExpenseDrawer({
       return toast.error("Enter a description")
     }
     
-    setDirection(1)
-    setCurrentStep(s => Math.min(s + 1, STEPS.length - 1))
+    if (isMounted.current) {
+      setDirection(1)
+      setCurrentStep(s => Math.min(s + 1, STEPS.length - 1))
+    }
   }
 
   const handleBack = () => {
-    setDirection(-1)
-    setCurrentStep(s => Math.max(s - 1, 0))
+    if (isMounted.current) {
+      setDirection(-1)
+      setCurrentStep(s => Math.max(s - 1, 0))
+    }
   }
 
   const toggleSplitMember = (id: string) => {
-    setSplitWith(curr => 
-      curr.includes(id) 
-        ? curr.filter(x => x !== id) 
-        : [...curr, id]
-    )
+    if (isMounted.current) {
+      setSplitWith(curr => 
+        curr.includes(id) 
+          ? curr.filter(x => x !== id) 
+          : [...curr, id]
+      )
+    }
   }
 
   // Early return if no valid context
@@ -661,6 +763,11 @@ export function AddExpenseDrawer({
                       placeholder="0"
                       className="w-full max-w-[280px] text-7xl font-bold bg-transparent border-none text-center caret-[#00A896] outline-none placeholder:text-zinc-600/50"
                       aria-label="Enter amount in Indian Rupees"
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && amount && parseFloat(amount) > 0) {
+                          handleNext()
+                        }
+                      }}
                     />
                   </div>
                   <p className="text-zinc-500 text-sm mt-6">
@@ -725,6 +832,11 @@ export function AddExpenseDrawer({
                       placeholder="e.g., Dinner at restaurant, Taxi ride, Hotel stay"
                       className="bg-white/5 border-white/10 text-white h-14 rounded-2xl pl-5 text-lg placeholder:text-zinc-600 focus:border-[#00A896] focus:ring-[#00A896] transition-colors"
                       maxLength={100}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && description.trim()) {
+                          handleNext()
+                        }
+                      }}
                     />
                     <p className="text-xs text-zinc-500 text-right">
                       {description.length}/100 characters
@@ -891,7 +1003,7 @@ export function AddExpenseDrawer({
         <div className="p-5 border-t border-white/10 bg-[#020617]/90 backdrop-blur-lg sticky bottom-0">
           <Button
             onClick={currentStep === 2 ? handleSave : handleNext}
-            disabled={submitting || loading}
+            disabled={submitting || loading || sendingEmails}
             className="w-full h-14 text-lg font-bold rounded-xl bg-[#00A896] hover:bg-[#00A896]/90 active:scale-[0.98] transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-[#00A896]/20"
             size="lg"
           >
@@ -899,6 +1011,11 @@ export function AddExpenseDrawer({
               <>
                 <Loader2 className="w-5 h-5 animate-spin mr-2" />
                 {isEditing ? "Updating..." : "Saving..."}
+              </>
+            ) : sendingEmails ? (
+              <>
+                <Loader2 className="w-5 h-5 animate-spin mr-2" />
+                Sending Notifications...
               </>
             ) : currentStep === 2 ? (
               isEditing ? "Update Expense" : `Confirm (₹${amount ? parseFloat(amount).toLocaleString('en-IN') : "0"})`
